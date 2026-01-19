@@ -5,13 +5,18 @@ MEMORY {
 
 PAGE_SIZE = 256;
 
-ENTRY(_start);
+ENTRY(main);
 
 SECTIONS {
     . = ORIGIN(FLASH);
     .bootloader : {
         KEEP(*(.bootloader));
         KEEP(*(.bootloader.*));
+    } > FLASH
+    . = ALIGN(PAGE_SIZE);
+
+    .text.vectors : {
+        KEEP(*(.text.vectors));
     } > FLASH
     . = ALIGN(PAGE_SIZE);
 
@@ -38,4 +43,9 @@ SECTIONS {
         *(.bss.*);
     } > FLASH
     . = ALIGN(PAGE_SIZE);
+
+    /DISCARD/ : {
+        *(.ARM.exidx);
+        *(.ARM.exidx.*);
+    }
 }

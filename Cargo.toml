@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 rp2040-boot2 = "0.3.0"
+tock-registers = "0.10.1"
 
 [build-dependencies]
 cc = "1.2.53"

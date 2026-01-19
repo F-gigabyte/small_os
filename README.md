@@ -10,7 +10,8 @@ It is recommended to use a Linux based system.
 4. Install clang as described at [https://clang.llvm.org/get_started.html](https://clang.llvm.org/get_started.html). On Linux or MacOS, this could be done from a package manager
 
 ## Dependencies
-- rp2040-boot2 - a stage 2 bootloader for the raspberry pi pico
+- [rp2040-boot2](https://docs.rs/rp2040-boot2/0.3.0/rp2040_boot2/) - a stage 2 bootloader for the raspberry pi pico
+- [tock-registers](https://docs.rs/tock-registers/0.10.1/tock_registers/) - for safely accessing memory mapped registers
 
 ## Build Dependencies
-- cc - this allows linking in a c compiler to compile c and assembly programs so they can be linked in with the rust code. It is used to assemble the ARM assembly using clang.
+- [cc](https://docs.rs/cc/latest/cc/) - this allows linking in a c compiler to compile c and assembly programs so they can be linked in with the rust code. It is used to assemble the ARM assembly using clang.

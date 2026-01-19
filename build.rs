@@ -36,6 +36,10 @@ fn main() {
     // recompiled for armv6m
     builder.compiler("clang");
     read_dir(start_dir, &mut builder);
+    // prevents the vec table being discarded
+    // https://users.rust-lang.org/t/help-section-not-linked-into-program/92810/4 - answer by
+    // nerditatition (accessed 19/01/2026)
+    builder.link_lib_modifier("+whole-archive");
     // compiles to a binary called 'small_os'
     builder.compile("small_os");
 }

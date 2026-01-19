@@ -1,0 +1,9 @@
+[default.general]
+chip = "RP2040"
+
+[default.reset]
+halt_afterwards = false
+
+[default.gdb]
+enabled = true
+gdb_connection_string = "127.0.0.1:1234"
