@@ -1,3 +1,25 @@
-fn main() {
-    println!("Hello, world!");
+// use core intrinsics 
+#![feature(core_intrinsics)]
+
+#![no_std]
+#![no_main]
+
+use core::{intrinsics::abort, panic::PanicInfo};
+
+/// panic handler
+/// this function is called when a panic happens
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    abort()
+}
+
+/// Stage 2 bootloader
+#[unsafe(link_section = ".bootloader")]
+#[used]
+pub static BOOTLOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
+
+/// Program entry point
+/// Disables mangling so it can be called from assembly
+#[unsafe(no_mangle)]
+pub extern "C" fn main() {
 }

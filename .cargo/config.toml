@@ -1,0 +1,8 @@
+# tell the compiler to compile these sections of the standard library
+[unstable]
+build-std-features = ["compiler-builtins-mem"] # makes compiler builtins provide memcpy and memset
+build-std = ["core", "compiler_builtins"]
+
+# Set default target to thumbv6m-none-eabi
+[build]
+target = "thumbv6m-none-eabi"
