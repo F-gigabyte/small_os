@@ -5,7 +5,7 @@ MEMORY {
 
 PAGE_SIZE = 256;
 
-ENTRY(main);
+ENTRY(_start);
 
 SECTIONS {
     . = ORIGIN(FLASH);
