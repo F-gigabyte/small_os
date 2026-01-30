@@ -2,7 +2,7 @@ use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::ReadPureWrite};
 
-use crate::mutex::Mutex;
+use crate::mutex::SpinIRQ;
 
 #[repr(C)]
 struct WatchdogRegisters {
@@ -59,6 +59,6 @@ unsafe impl Sync for Watchdog {}
 
 static WATCHDOG_BASE: usize = 0x40058000;
 
-pub static WATCHDOG: Mutex<Watchdog> = unsafe {
-    Mutex::new(Watchdog::new(WATCHDOG_BASE))
+pub static WATCHDOG: SpinIRQ<Watchdog> = unsafe {
+    SpinIRQ::new(Watchdog::new(WATCHDOG_BASE))
 };

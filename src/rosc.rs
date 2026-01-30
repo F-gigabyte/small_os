@@ -2,7 +2,7 @@ use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite}};
 
-use crate::mutex::Mutex;
+use crate::mutex::SpinIRQ;
 
 #[repr(C)]
 struct ROSCRegisters {
@@ -140,6 +140,6 @@ unsafe impl Sync for ROSC {}
 
 static ROSC_BASE: usize = 0x40060000;
 
-pub static ROSC: Mutex<ROSC> = unsafe {
-    Mutex::new(ROSC::new(ROSC_BASE))
+pub static ROSC: SpinIRQ<ROSC> = unsafe {
+    SpinIRQ::new(ROSC::new(ROSC_BASE))
 };

@@ -1,6 +1,6 @@
 MEMORY {
-    FLASH : ORIGIN = 0x10000000, LENGTH = 2048K
-    RAM : ORIGIN = 0x20000000, LENGTH = 264K
+    FLASH (RX) : ORIGIN = 0x10000000, LENGTH = 2048K
+    RAM (RW) : ORIGIN = 0x20000000, LENGTH = 264K
 }
 
 PAGE_SIZE = 256;
@@ -13,36 +13,40 @@ SECTIONS {
         KEEP(*(.bootloader));
         KEEP(*(.bootloader.*));
     } > FLASH
-    . = ALIGN(PAGE_SIZE);
 
     .text.vectors : {
         KEEP(*(.text.vectors));
     } > FLASH
-    . = ALIGN(PAGE_SIZE);
 
     .text : {
         *(.text);
         *(.text.*);
     } > FLASH
-    . = ALIGN(PAGE_SIZE);
     
     .rodata : {
         *(.rodata);
         *(.rodata.*);
     } > FLASH
-    . = ALIGN(PAGE_SIZE);
     
     .data : {
         *(.data);
         *(.data.*);
-    } > FLASH
-    . = ALIGN(PAGE_SIZE);
-    
-    .bss : {
         *(.bss);
         *(.bss.*);
+    } > RAM AT > FLASH
+
+    .rodata.ramdisk ALIGN(2 * PAGE_SIZE): {
+        *(.ramdisk);
     } > FLASH
-    . = ALIGN(PAGE_SIZE);
+
+    __data_start = LOADADDR(.data);
+    __data_end = LOADADDR(.data) + SIZEOF(.data);
+
+    __ram_start = ORIGIN(RAM);
+    __ram_end = ORIGIN(RAM) + LENGTH(RAM);
+
+    __flash_start = ORIGIN(FLASH);
+    __flash_end = ORIGIN(FLASH) + LENGTH(FLASH);
 
     /DISCARD/ : {
         *(.ARM.exidx);

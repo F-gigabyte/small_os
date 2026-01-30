@@ -1,4 +1,6 @@
-use crate::println;
+use core::{arch::asm, marker::PhantomData};
+
+use crate::{println, timer::{TIMER, Timer, TimerIRQ}};
 
 #[repr(C)]
 pub struct StackTrace {
@@ -70,4 +72,72 @@ pub extern "C" fn sys_pend() -> ! {
 pub extern "C" fn sys_tick() -> ! {
     println!("Sys Tick!");
     loop {}
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn timer_tick() {
+    // SAFETY
+    // In interrupt handler so interrupts are disabled
+    let cs = unsafe {
+        CS::new()
+    };
+    let mut timer = TIMER.lock(&cs);
+    timer.handle_irq(TimerIRQ::Timer0);
+}
+
+// critical section
+pub struct CS {
+    _phantom: PhantomData<()>
+}
+
+impl CS {
+    pub unsafe fn new() -> Self {
+        Self {
+            _phantom: PhantomData
+        }
+    }
+}
+
+pub unsafe fn disable_irq() {
+    unsafe {
+        asm!("cpsid i");
+    }
+}
+
+pub unsafe fn enable_irq() {
+    unsafe {
+        asm!("cpsie i");
+    }
+}
+
+#[inline(always)]
+pub fn irq_enabled() -> bool {
+    let mut r0: u32;
+    unsafe {
+        asm!("mrs {r0}, PRIMASK", r0 = out(reg) r0);
+    }
+    r0 & 1 == 0
+}
+
+pub fn without_inter<F: FnOnce(&CS)>(f: F) {
+    let irq = irq_enabled();
+    if irq {
+        unsafe {
+            disable_irq();
+        }
+    }
+    // Explicity state scope so cs doesn't go beyond interrupt free boundaries
+    {
+        let cs = unsafe {
+            CS::new()
+        };
+        f(&cs);
+    }
+    if irq {
+        unsafe {
+            enable_irq();
+        }
+    }
+    // SAFETY
+    // the state of IRQ before this function is the same as afterwards
 }

@@ -2,7 +2,7 @@ use core::{mem, ptr::{self, NonNull}};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadOnly, ReadPure, ReadPureWrite, WriteOnly}};
 
-use crate::{mmio::{REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS}, mutex::Mutex};
+use crate::{mmio::{REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS}, mutex::SpinIRQ};
 
 mod reset_register {
     pub const IO_BANK0_SHIFT: usize = 5;
@@ -80,6 +80,6 @@ unsafe impl Sync for Reset {}
 
 static RESET_BASE: usize = 0x4000c000;
 
-pub static RESET: Mutex<Reset> = unsafe {
-    Mutex::new(Reset::new(RESET_BASE))
+pub static RESET: SpinIRQ<Reset> = unsafe {
+    SpinIRQ::new(Reset::new(RESET_BASE))
 };

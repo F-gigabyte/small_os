@@ -1,4 +1,6 @@
-use std::{path::Path, fs};
+use std::{fs, path::Path, process::Command};
+
+use cc::Build;
 
 
 /// Recursively searches each directory in `path` to find assembly code files (end in .s or .S) and
@@ -23,6 +25,28 @@ fn read_dir(path: &Path, builder: &mut cc::Build) {
     }
 }
 
+fn build_ramdisk(builder: &mut Build) {
+    fs::create_dir_all("obj").unwrap();
+    Command::new("tar")
+        .arg("-cf")
+        .arg("ramdisk.tar")
+        .arg("ramdisk")
+        .output()
+        .unwrap();
+    Command::new("arm-none-eabi-objcopy")
+        .arg("-O")
+        .arg("elf32-littlearm")
+        .arg("-I")
+        .arg("binary")
+        .arg("--rename-section")
+        .arg(".data=.ramdisk")
+        .arg("ramdisk.tar")
+        .arg("obj/ramdisk.o")
+        .output()
+        .unwrap();
+    builder.object("obj/ramdisk.o");
+}
+
 fn main() {
     // rerun if linker script changes
     println!("cargo::rerun-if-changed=link.ld");
@@ -30,8 +54,9 @@ fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     // use link.ld linker script
     println!("cargo::rustc-link-arg=-Tlink.ld");
-    let start_dir = Path::new("src");
     let mut builder = cc::Build::new();
+    build_ramdisk(&mut builder);
+    let start_dir = Path::new("src");
     // set default compiler to clang as its by default a cross compiler while gcc would need to be
     // recompiled for armv6m
     builder.compiler("clang");

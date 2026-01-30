@@ -1,6 +1,6 @@
 use core::fmt::{self, Write};
 
-use crate::uart::UART1;
+use crate::{inter::without_inter, uart::UART1};
 
 // https://os.phil-opp.com/vga-text-mode/ accessed 22/01/2026
 #[macro_export]
@@ -16,5 +16,7 @@ macro_rules! println {
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
-    UART1.lock().write_fmt(args).unwrap();
+    without_inter(|cs| {
+        UART1.lock(cs).write_fmt(args).unwrap();
+    });
 }

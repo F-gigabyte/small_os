@@ -14,6 +14,8 @@
 .type _sys_tick, "function"
 .globl _unimplemented_irq
 .type _unimplemented_irq, "function"
+.globl _timer_irq
+.type _timer_irq, "function"
 
 _nmi:
     mov r0, sp
@@ -38,3 +40,9 @@ _sys_tick:
 _unimplemented_irq:
     mov r0, sp
     bl unimplemented_irq
+
+_timer_irq:
+    mov r0, sp
+    bl timer_tick
+    ldr r0, =0xfffffff1
+    bx r0

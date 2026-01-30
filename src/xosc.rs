@@ -2,7 +2,7 @@ use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPureWrite, ReadWrite}};
 
-use crate::{mmio::REG_ALIAS_SET_BITS, mutex::Mutex};
+use crate::{mmio::REG_ALIAS_SET_BITS, mutex::SpinIRQ};
 
 // https://github.com/dwelch67/raspberrypi-pico/blob/main/uart01/notmain.c accessed 21/01/2026
 
@@ -89,6 +89,6 @@ unsafe impl Sync for XOSC {}
 
 static XOSC_BASE: usize = 0x40024000;
 
-pub static XOSC: Mutex<XOSC> = unsafe {
-    Mutex::new(XOSC::new(XOSC_BASE))
+pub static XOSC: SpinIRQ<XOSC> = unsafe {
+    SpinIRQ::new(XOSC::new(XOSC_BASE))
 };

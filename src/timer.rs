@@ -2,7 +2,7 @@ use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, WriteOnly}};
 
-use crate::{mmio::{REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS}, mutex::Mutex, println};
+use crate::{mmio::{REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS}, mutex::SpinIRQ, println};
 
 struct TimerRegisters {
     timehw: WriteOnly<u32>, // 0x0
@@ -60,7 +60,8 @@ mod interrupt_register {
 pub struct Timer {
     registers: UniqueMmioPointer<'static, TimerRegisters>,
     set_reg: UniqueMmioPointer<'static, TimerRegisters>,
-    clear_reg: UniqueMmioPointer<'static, TimerRegisters>
+    clear_reg: UniqueMmioPointer<'static, TimerRegisters>,
+    counts: [u32; 4],
 }
 
 #[derive(Clone, Copy)]
@@ -77,7 +78,8 @@ impl Timer {
             Self {
                 registers: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base)).unwrap()),
                 set_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_SET_BITS)).unwrap()),
-                clear_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_CLR_BITS)).unwrap())
+                clear_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_CLR_BITS)).unwrap()),
+                counts: [0; 4]
             }
         }
     }
@@ -92,44 +94,77 @@ impl Timer {
         (upper as u64) << 32 | (lower as u64)
     }
 
-    pub fn set_count0(&mut self, micros: u32) {
+    pub fn set_count(&mut self, timer: TimerIRQ, micros: u32) {
+        self.counts[timer as usize] = micros;
+        match timer {
+            TimerIRQ::Timer0 => self.set_count0(),
+            TimerIRQ::Timer1 => self.set_count1(),
+            TimerIRQ::Timer2 => self.set_count2(),
+            TimerIRQ::Timer3 => self.set_count3(),
+        }
+    }
+    
+    #[inline(always)]
+    fn set_count0(&mut self) {
         let time = (self.read_time() & (u32::MAX as u64)) as u32;
-        let time = time.wrapping_add(micros);
+        let time = time.wrapping_add(self.counts[0]);
         field!(self.registers, alarm0).write(time);
     }
     
-    pub fn set_count1(&mut self, micros: u32) {
+    #[inline(always)]
+    fn set_count1(&mut self) {
         let time = (self.read_time() & (u32::MAX as u64)) as u32;
-        let time = time.wrapping_add(micros);
+        let time = time.wrapping_add(self.counts[1]);
         field!(self.registers, alarm1).write(time);
     }
     
-    pub fn set_count2(&mut self, micros: u32) {
+    #[inline(always)]
+    fn set_count2(&mut self) {
         let time = (self.read_time() & (u32::MAX as u64)) as u32;
-        let time = time.wrapping_add(micros);
+        let time = time.wrapping_add(self.counts[2]);
         field!(self.registers, alarm2).write(time);
     }
     
-    pub fn set_count3(&mut self, micros: u32) {
+    #[inline(always)]
+    fn set_count3(&mut self) {
         let time = (self.read_time() & (u32::MAX as u64)) as u32;
-        let time = time.wrapping_add(micros);
+        let time = time.wrapping_add(self.counts[3]);
         field!(self.registers, alarm3).write(time);
     }
 
+    #[inline(always)]
     pub fn enable_irq(&mut self, timer: TimerIRQ) { 
         field!(self.set_reg, int_enable).write(1 << (timer as usize));
     }
     
+    #[inline(always)]
     pub fn disable_irq(&mut self, timer: TimerIRQ) { 
         field!(self.clear_reg, int_enable).write(1 << (timer as usize));
     }
     
+    #[inline(always)]
     pub fn clear_irq(&mut self, timer: TimerIRQ) {
         field!(self.registers, int_raw).write(1 << (timer as usize));
     }
 
+    pub fn handle_irq(&mut self, timer: TimerIRQ) {
+        self.clear_irq(timer);
+        match timer {
+            TimerIRQ::Timer0 => self.set_count0(),
+            TimerIRQ::Timer1 => self.set_count1(),
+            TimerIRQ::Timer2 => self.set_count2(),
+            TimerIRQ::Timer3 => self.set_count3(),
+        }
+    }
+
+    #[inline(always)]
     pub fn get_irq(&mut self) -> u32 {
         field!(self.registers, int_status).read()
+    }
+
+    #[inline(always)]
+    pub fn read_alarm0(&mut self) -> u32 {
+        field!(self.registers, alarm0).read()
     }
 }
 
@@ -138,6 +173,6 @@ unsafe impl Sync for Timer {}
 
 static TIMER_BASE: usize =  0x40054000;
 
-pub static TIMER: Mutex<Timer> = unsafe {
-    Mutex::new(Timer::new(TIMER_BASE))
+pub static TIMER: SpinIRQ<Timer> = unsafe {
+    SpinIRQ::new(Timer::new(TIMER_BASE))
 };

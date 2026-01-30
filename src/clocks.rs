@@ -2,7 +2,7 @@ use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, ReadWrite}};
 
-use crate::{mmio::{REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS}, mutex::Mutex, wait};
+use crate::{mmio::{REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS}, mutex::SpinIRQ, wait::{self, wait_cycles}};
 
 #[repr(C)]
 struct ClockRegisters {
@@ -207,27 +207,41 @@ impl Clocks {
         1 << (src >> shift)
     }
 
-    pub fn setup_clocks(&mut self) {
+    pub fn preinit_sys_ref(&mut self) {
+        // ref clock
         let mut ref_ctrl = field!(self.registers, ref_ctrl).read();
         ref_ctrl &= !ref_ctrl_register::SRC_MASK;
         field!(self.registers, ref_ctrl).write(ref_ctrl | ref_ctrl_register::SRC_XOSC);
         while field!(self.registers, ref_selected).read() & Self::clock_bitmap(ref_ctrl_register::SRC_XOSC, ref_ctrl_register::SRC_SHIFT) == 0 {} 
+        
+        // sys clock
         let mut sys_ctrl = field!(self.registers, sys_ctrl).read();
         sys_ctrl &= !sys_ctrl_register::SRC_MASK;
         field!(self.registers, sys_ctrl).write(sys_ctrl | sys_ctrl_register::SRC_REF);
         while field!(self.registers, sys_selected).read() & Self::clock_bitmap(sys_ctrl_register::SRC_REF, sys_ctrl_register::SRC_SHIFT) == 0 {} 
-        let mut sys_ctrl = field!(self.registers, sys_ctrl).read();
-        sys_ctrl &= !sys_ctrl_register::AUXSRC_MASK;
-        field!(self.registers, sys_ctrl).write(sys_ctrl | sys_ctrl_register::AUXSRC_XOSC);
+    }
+
+    pub fn setup_clocks(&mut self) {
+        // sys clock
         let mut sys_ctrl = field!(self.registers, sys_ctrl).read();
         sys_ctrl &= !sys_ctrl_register::SRC_MASK;
-        field!(self.registers, sys_ctrl).write(sys_ctrl | sys_ctrl_register::SRC_SYS_AUX);
-        while field!(self.registers, sys_selected).read() & Self::clock_bitmap(sys_ctrl_register::SRC_SYS_AUX, sys_ctrl_register::SRC_SHIFT) == 0 {} 
+        field!(self.registers, sys_ctrl).write(sys_ctrl);
+        while field!(self.registers, sys_selected).read() & sys_ctrl_register::SRC_MASK != 1 {}
+        let mut sys_ctrl = field!(self.registers, sys_ctrl).read();
+        sys_ctrl &= !sys_ctrl_register::AUXSRC_MASK;
+        sys_ctrl |= sys_ctrl_register::AUXSRC_PLL_SYS;
+        field!(self.registers, sys_ctrl).write(sys_ctrl);
+        let mut sys_ctrl = field!(self.registers, sys_ctrl).read();
+        sys_ctrl &= !sys_ctrl_register::SRC_MASK;
+        sys_ctrl |= sys_ctrl_register::SRC_SYS_AUX;
+        field!(self.registers, sys_ctrl).write(sys_ctrl);
+        while field!(self.registers, sys_selected).read() & Self::clock_bitmap(sys_ctrl_register::SRC_SYS_AUX, sys_ctrl_register::SRC_SHIFT) == 0 {}
+        // peripheral clock
         field!(self.clear_reg, peri_ctrl).write(peri_ctrl_register::ENABLE_MASK);
-        wait::wait_cycles(6);
-        field!(self.registers, peri_ctrl).write(peri_ctrl_register::AUXSRC_SYS);
+        wait::wait_cycles(33);
+        field!(self.registers, peri_ctrl).write(peri_ctrl_register::AUXSRC_XOSC);
         field!(self.set_reg, peri_ctrl).write(peri_ctrl_register::ENABLE_MASK);
-        wait::wait_cycles(6);
+        wait::wait_cycles(33);
     }
 }
 
@@ -236,6 +250,6 @@ unsafe impl Sync for Clocks {}
 
 static CLOCKS_BASE: usize = 0x40008000;
 
-pub static CLOCKS: Mutex<Clocks> = unsafe {
-    Mutex::new(Clocks::new(CLOCKS_BASE))
+pub static CLOCKS: SpinIRQ<Clocks> = unsafe {
+    SpinIRQ::new(Clocks::new(CLOCKS_BASE))
 };

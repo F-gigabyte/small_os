@@ -2,7 +2,7 @@ use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::ReadPureWrite};
 
-use crate::mutex::Mutex;
+use crate::mutex::SpinIRQ;
 
 mod gpio_ctrl_register {
     pub const FUNCSEL_SHIFT: usize = 0;
@@ -101,6 +101,6 @@ unsafe impl Sync for IOBank0 {}
 
 static IOBANK0_BASE: usize = 0x40014000;
 
-pub static IOBANK0: Mutex<IOBank0> = unsafe {
-    Mutex::new(IOBank0::new(IOBANK0_BASE))
+pub static IOBANK0: SpinIRQ<IOBank0> = unsafe {
+    SpinIRQ::new(IOBank0::new(IOBANK0_BASE))
 };

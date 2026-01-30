@@ -2,7 +2,7 @@ use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite}};
 
-use crate::mutex::Mutex;
+use crate::mutex::IRQMutex;
 
 #[repr(C)]
 struct InterSetEnable {
@@ -81,6 +81,8 @@ unsafe impl Send for NVIC {}
 unsafe impl Sync for NVIC {}
 
 static NVIC_BASE: usize = 0xe000e100;
-pub static NVIC: Mutex<NVIC> = unsafe {
-    Mutex::new(NVIC::new(NVIC_BASE))
+// SAFETY
+// NVIC implemented for both processors so there shouldn't be a data race
+pub static NVIC: IRQMutex<NVIC> = unsafe {
+    IRQMutex::new(NVIC::new(NVIC_BASE))
 };

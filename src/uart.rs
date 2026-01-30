@@ -1,8 +1,8 @@
-use core::{fmt::Write, ptr::{self, NonNull}};
+use core::{fmt::Write, ptr::{self, NonNull}, sync::atomic::{Ordering, compiler_fence}};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, ReadWrite, WriteOnly}};
 
-use crate::{mmio::REG_ALIAS_SET_BITS, mutex::Mutex};
+use crate::{mmio::REG_ALIAS_SET_BITS, mutex::SpinIRQ, wait::wait_cycles};
 
 #[repr(C)]
 struct UARTRegisters {
@@ -199,6 +199,7 @@ impl UART {
 
     pub fn reset(&mut self) {
         // disable UART
+        while field!(self.registers, flag).read() & flag_register::BUSY_MASK != 0 {}
         field!(self.registers, ctrl).write(0);
         // clear all interrupts
         field!(self.registers, inter_clr).write(interrupt_register::ALL_MASK);
@@ -211,8 +212,9 @@ impl UART {
         // mask all interrupts (no interrupts will be generated)
         field!(self.registers, mask_set_clr).write(interrupt_register::ALL_MASK);
         // enable UART and TX section
-        field!(self.registers, ctrl).write(ctrl_register::TXE_MASK);
-        field!(self.set_reg, ctrl).write(ctrl_register::UARTEN_MASK);
+        field!(self.registers, ctrl).write(ctrl_register::TXE_MASK | ctrl_register::UARTEN_MASK);
+        // in release builds, if this is not there garbage is printed to the screen
+        wait_cycles(1000);
     }
 
     #[inline(always)]
@@ -237,6 +239,7 @@ impl UART {
     }
 }
 
+// https://os.phil-opp.com/vga-text-mode/ accessed 22/01/2026
 impl Write for UART {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         self.put_str(s);
@@ -251,6 +254,6 @@ unsafe impl Sync for UART {}
 
 static UART1_BASE: usize = 0x40038000;
 
-pub static UART1: Mutex<UART> = unsafe {
-    Mutex::new(UART::new(UART1_BASE))
+pub static UART1: SpinIRQ<UART> = unsafe {
+    SpinIRQ::new(UART::new(UART1_BASE))
 };
