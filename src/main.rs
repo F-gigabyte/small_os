@@ -56,7 +56,8 @@ pub extern "C" fn main() -> ! {
             CS::new()
         };
         let mut reset = RESET.lock(&cs);
-        // https://github.com/dwelch67/raspberrypi-pico/blob/main/uart01/notmain.c accessed 21/01/2026
+        // Clocks need to be set up before the UART
+        // Based on https://github.com/dwelch67/raspberrypi-pico/blob/main/uart01/notmain.c accessed 21/01/2026
         let mut clocks = CLOCKS.lock(&cs);
         let mut xosc = XOSC.lock(&cs);
         clocks.disble_sys_resus();
