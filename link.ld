@@ -35,10 +35,6 @@ SECTIONS {
         *(.bss.*);
     } > RAM AT > FLASH
 
-    .rodata.ramdisk ALIGN(2 * PAGE_SIZE): {
-        *(.ramdisk);
-    } > FLASH
-
     __data_start = LOADADDR(.data);
     __data_end = LOADADDR(.data) + SIZEOF(.data);
 

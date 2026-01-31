@@ -4,9 +4,9 @@
 #![no_std]
 #![no_main]
 
-use core::{arch::asm, intrinsics::abort, panic::PanicInfo, ptr};
+use core::{intrinsics::abort, panic::PanicInfo};
 
-use crate::{clocks::{CLOCKS, PeriAuxSrc}, inter::{CS, disable_irq, enable_irq, irq_enabled, without_inter}, io_bank0::IOBANK0, mutex::force_spinlock_unlock, nvic::NVIC, pll::PLL, reset::RESET, rosc::ROSC, tar::parse_headers, timer::{TIMER, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
+use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, mutex::force_spinlock_unlock, nvic::NVIC, pll::PLL, reset::RESET, rosc::ROSC, timer::{TIMER, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
 
 pub mod uart;
 pub mod reset;
@@ -23,12 +23,6 @@ pub mod timer;
 pub mod nvic;
 pub mod watchdog;
 pub mod pll;
-pub mod tar;
-
-unsafe extern "C" {
-    static _binary_ramdisk_tar_start: u8;
-    static _binary_ramdisk_tar_end: u8;
-}
 
 /// panic handler
 /// this function is called when a panic happens
@@ -78,8 +72,8 @@ pub extern "C" fn main() -> ! {
         reset.reset_uart1();
         reset.reset_timer();
 
-        let mut IO_bank0 = IOBANK0.lock(&cs);
-        IO_bank0.set_gpio_uart1();
+        let mut io_bank0 = IOBANK0.lock(&cs);
+        io_bank0.set_gpio_uart1();
 
         {
             let mut uart1 = UART1.lock(&cs);
@@ -101,11 +95,5 @@ pub extern "C" fn main() -> ! {
         enable_irq();
     }
     println!("Completed Setup");
-    unsafe {
-        println!("symbol start: {:?}", &raw const _binary_ramdisk_tar_start);
-        let header = ptr::with_exposed_provenance((&raw const _binary_ramdisk_tar_start) as usize);
-        println!("Header address: {:?}", header);
-        parse_headers(header);
-    }
     loop {}
 }

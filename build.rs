@@ -33,7 +33,6 @@ fn main() {
     // use link.ld linker script
     println!("cargo::rustc-link-arg=-Tlink.ld");
     let mut builder = cc::Build::new();
-    build_ramdisk(&mut builder);
     let start_dir = Path::new("src");
     // set default compiler to clang as its by default a cross compiler while gcc would need to be
     // recompiled for armv6m
