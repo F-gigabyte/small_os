@@ -25,28 +25,6 @@ fn read_dir(path: &Path, builder: &mut cc::Build) {
     }
 }
 
-fn build_ramdisk(builder: &mut Build) {
-    fs::create_dir_all("obj").unwrap();
-    Command::new("tar")
-        .arg("-cf")
-        .arg("ramdisk.tar")
-        .arg("ramdisk")
-        .output()
-        .unwrap();
-    Command::new("arm-none-eabi-objcopy")
-        .arg("-O")
-        .arg("elf32-littlearm")
-        .arg("-I")
-        .arg("binary")
-        .arg("--rename-section")
-        .arg(".data=.ramdisk")
-        .arg("ramdisk.tar")
-        .arg("obj/ramdisk.o")
-        .output()
-        .unwrap();
-    builder.object("obj/ramdisk.o");
-}
-
 fn main() {
     // rerun if linker script changes
     println!("cargo::rerun-if-changed=link.ld");
