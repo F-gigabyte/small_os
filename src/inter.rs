@@ -66,13 +66,20 @@ pub extern "C" fn hard_fault(trace: *mut StackTrace) -> ! {
     panic!();
 }
 
+/// IRQ handler
+/// `irq` is the IRQ to wake up all sleeping processes on
+/// Interrupts are handled in a similar way to QNX with processes
+/// registering to them and waiting for them to happen
+/// https://www.qnx.com/developers/docs/8.0/com.qnx.doc.neutrino.lib_ref/topic/i/interruptattachevent.html accessed 1/02/2026
 #[unsafe(no_mangle)]
-pub extern "C" fn irq_handler(irq: u8, mode: u8) {
+pub extern "C" fn irq_handler(irq: u8) {
     let cs = unsafe {
         CS::new()
     };
     let mut nvic = NVIC.lock(&cs);
     nvic.clear_pending_irq(irq);
+    let mut scheduler = scheduler(&cs);
+    scheduler.wake(irq);
 }
 
 #[unsafe(no_mangle)]
@@ -94,7 +101,25 @@ pub extern "C" fn sys_call(service: u32, stack: *mut StackTrace) -> *mut Proc {
         } else {
             stack.r0 = 1;
         }
-    } else {
+    } else if service == 1 {
+        let mut scheduler = scheduler(&cs);
+        stack.r0 = 0;
+        scheduler.terminate_current();
+    } else if service == 2 {
+        if stack.r0 < 32 {
+            let mut scheduler = scheduler(&cs);
+            scheduler.sleep_irq(stack.r0 as u8);
+            let mut nvic = NVIC.lock(&cs);
+            // enable the IRQ for firing
+            nvic.enable_irq(stack.r0 as u8);
+            stack.r0 = 0;
+        } else {
+            stack.r0 = 1;
+        }
+    } else if service == 3 {
+
+    }
+    else {
         stack.r0 = 2;
     }
     unsafe {
@@ -124,6 +149,17 @@ pub extern "C" fn sys_tick() {
     sys_tick.disable();
     let mut sys = SYSTEM.lock(&cs);
     sys.clear_irq(SysIRQ::SysTick);
+}
+
+/// performs a process switch and gets the next process
+/// SAFETY
+/// must be called without interrupts
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn do_proc_switch() -> *mut Proc {
+    let cs = unsafe {
+        CS::new()
+    };
+    proc_switch(cs)
 }
 
 fn proc_switch(cs: CS) -> *mut Proc {

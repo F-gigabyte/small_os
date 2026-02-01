@@ -28,6 +28,7 @@ pub mod scheduler;
 pub mod test_proc;
 pub mod sys_tick;
 pub mod system;
+pub mod channel;
 
 /// panic handler
 /// this function is called when a panic happens
@@ -93,13 +94,23 @@ pub extern "C" fn main() -> ! {
         timer.enable_irq(TimerIRQ::Timer0);
         let mut nvic = NVIC.lock(&cs);
         nvic.enable_irq(irqs::TIMER0);
-        let test_proc = unsafe {
-            &mut PROCESSES[0]
-        };
-        test_proc.init(1, test_func as *const () as u32, 0x20005000, 0);
-        let mut scheduler = scheduler(&cs);
-        unsafe {
-            scheduler.add_process(&raw mut *test_proc);
+        {
+            unsafe {
+                let len = (*(&raw const PROCESSES)).len();
+                for i in 0..len {
+                    PROCESSES[i].pid = i as u32 + 1;
+                }
+            }
+        }
+        {
+            let test_proc = unsafe {
+                &mut PROCESSES[0]
+            };
+            test_proc.init(test_func as *const () as u32, 0x20005000, 0);
+            let mut scheduler = scheduler(&cs);
+            unsafe {
+                scheduler.add_process(&raw mut *test_proc);
+            }
         }
         let mut sys = SYSTEM.lock(&cs);
         sys.send_pend();

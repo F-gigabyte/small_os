@@ -14,6 +14,8 @@ pub struct Scheduler {
     end_proc: [*mut Proc; NUM_PRIORITIES],
     // process currently running
     current: *mut Proc,
+    // IRQ events
+    irq_events: [*mut Proc; 32],
 }
 
 impl Scheduler {
@@ -22,6 +24,7 @@ impl Scheduler {
             start_proc: [ptr::null_mut(); NUM_PRIORITIES], 
             end_proc: [ptr::null_mut(); NUM_PRIORITIES],
             current: ptr::null_mut(),
+            irq_events: [ptr::null_mut(); 32]
         }
     }
 
@@ -67,7 +70,7 @@ impl Scheduler {
             let current = unsafe {
                 &mut *self.current
             };
-            current.set_sleep();
+            current.set_running(false);
             priority = current.priority() as usize;
         }
         // if process with same priority as current, select it to be scheduled next or else
@@ -84,7 +87,7 @@ impl Scheduler {
                 if *end == &raw mut *proc {
                     *end = ptr::null_mut();
                 }
-                proc.set_running();
+                proc.set_running(true);
                 self.current = &raw mut *proc;
                 return;
             }
@@ -97,10 +100,44 @@ impl Scheduler {
             let current = unsafe {
                 &mut *self.current
             };
-            current.set_sleep();
+            current.set_running(false);
         }
         self.current = ptr::null_mut();
         self.next_process();
+    }
+
+    pub fn sleep_irq(&mut self, irq: u8) {
+        if !self.current.is_null() {
+            let irq = irq as usize;
+            let current = unsafe {
+                &mut *self.current
+            };
+            current.sleep();
+            current.next = self.irq_events[irq];
+            self.irq_events[irq] = self.current;
+            self.current = ptr::null_mut();
+            self.next_process();
+        }
+    }
+
+    pub fn wake(&mut self, irq: u8) {
+        let irq = irq as usize;
+        let mut current = self.irq_events[irq];
+        while !current.is_null() {
+            let proc = unsafe {
+                &mut *current
+            };
+            let next = proc.next;
+            if !proc.runnable() {
+                proc.set_r0(irq as u32);
+                proc.wake();
+                unsafe {
+                    self.add_process(current);
+                }
+            }
+            current = next;
+        }
+        self.irq_events[irq] = ptr::null_mut();
     }
 }
 
@@ -118,7 +155,7 @@ pub fn get_cpuid() -> u32 {
 
 /// Gets the scheduler for this core
 /// core 0 gets scheduler 0 while core 1 gets scheduler 1
-pub fn scheduler(cs: &CS) -> IRQGuard<Scheduler> {
+pub fn scheduler<'a, 'b>(cs: &'b CS) -> IRQGuard<'a, 'b, Scheduler> {
     static SCHEDULER0: IRQMutex<Scheduler> = unsafe {
         IRQMutex::new(Scheduler::new())
     };

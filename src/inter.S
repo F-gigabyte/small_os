@@ -91,6 +91,14 @@ _sys_call:
     // r8 -> service number
     mov r0, r8
     bl sys_call
+    // if got null pointer (no process) wait for an interrupt and try again
+2:
+    movs r0, r0
+    bne 3f
+    wfi
+    bl do_proc_switch
+    b 2b
+3:
     bl schedule
 
 _sys_pend:
@@ -112,6 +120,14 @@ _sys_pend:
     str r1, [r0]
 1:
     bl pend_sv
+    // if got null pointer (no process) wait for an interrupt and try again
+2:
+    movs r0, r0
+    bne 3f
+    wfi
+    bl do_proc_switch
+    b 2b
+3:
     bl schedule
 
 _sys_tick:
@@ -202,4 +218,12 @@ _proc_switch:
     str r1, [r0]
 1:
     bl timer0
+    // if got null pointer (no process) wait for an interrupt and try again
+2:
+    movs r0, r0
+    bne 3f
+    wfi
+    bl do_proc_switch
+    b 2b
+3:
     bl schedule
