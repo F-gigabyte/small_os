@@ -146,26 +146,6 @@ impl Timer {
     pub fn clear_irq(&mut self, timer: TimerIRQ) {
         field!(self.registers, int_raw).write(1 << (timer as usize));
     }
-
-    pub fn handle_irq(&mut self, timer: TimerIRQ) {
-        self.clear_irq(timer);
-        match timer {
-            TimerIRQ::Timer0 => self.set_count0(),
-            TimerIRQ::Timer1 => self.set_count1(),
-            TimerIRQ::Timer2 => self.set_count2(),
-            TimerIRQ::Timer3 => self.set_count3(),
-        }
-    }
-
-    #[inline(always)]
-    pub fn get_irq(&mut self) -> u32 {
-        field!(self.registers, int_status).read()
-    }
-
-    #[inline(always)]
-    pub fn read_alarm0(&mut self) -> u32 {
-        field!(self.registers, alarm0).read()
-    }
 }
 
 unsafe impl Send for Timer {}

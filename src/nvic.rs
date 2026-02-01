@@ -29,6 +29,32 @@ struct InterPriorityRegisters {
     inter_priority: [ReadPureWrite<u32>; 8], // 0xe400 -> 0xe41c
 }
 
+pub mod irqs {
+    pub const TIMER0: u8 = 0;
+    pub const TIMER1: u8 = 1;
+    pub const TIMER2: u8 = 2;
+    pub const TIMER3: u8 = 3;
+    pub const PWM_WRAP: u8 = 4;
+    pub const USB_CTRL: u8 = 5;
+    pub const XIP: u8 = 6;
+    pub const PIO0_IRQ0: u8 = 7;
+    pub const PIO0_IRQ1: u8 = 8;
+    pub const PIO1_IRQ0: u8 = 9;
+    pub const PIO1_IRQ1: u8 = 10;
+    pub const IO_BANK0: u8 = 11;
+    pub const IO_QSPI: u8 = 12;
+    pub const SIO_PROC0: u8 = 13;
+    pub const SIO_PROC1: u8 = 14;
+    pub const CLOCKS: u8 = 15;
+    pub const SPI0: u8 = 16;
+    pub const SPI1: u8 = 17;
+    pub const UART0: u8 = 18;
+    pub const UART1: u8 = 19;
+    pub const ADC_FIFO: u8 = 20;
+    pub const I2C0: u8 = 21;
+    pub const I2C1: u8 = 22;
+}
+
 mod inter_priority_register {
     pub const IP_0_SHIFT: usize = 6;
     pub const IP_1_SHIFT: usize = 14;
@@ -68,8 +94,14 @@ impl NVIC {
         }
     }
 
-    pub fn enable_timer_irq(&mut self) {
-        field!(self.inter_set_enable_reg, register).write(0xf);
+    #[inline(always)]
+    pub fn enable_irq(&mut self, irq: u8) {
+        field!(self.inter_set_enable_reg, register).write(1 << irq);
+    }
+
+    #[inline(always)]
+    pub fn clear_pending_irq(&mut self, irq: u8) {
+        field!(self.inter_clear_pend_reg, register).write(1 << irq);
     }
 
     pub fn get_pending(&mut self) -> u32 {
