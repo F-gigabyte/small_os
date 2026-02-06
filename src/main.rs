@@ -4,6 +4,8 @@
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test_runner)]
 
+#![feature(assert_matches)]
+
 #![no_std]
 #![no_main]
 #![reexport_test_harness_main = "test_main"]

@@ -248,6 +248,8 @@ pub static SYNC_ENDPOINTS2: Endpoints<SyncMessageQueue> = Endpoints { endpoints:
 
 #[cfg(test)]
 mod test {
+    use core::assert_matches::assert_matches;
+
     use crate::{print, println};
 
     use super::*;
@@ -306,6 +308,16 @@ mod test {
         assert_eq!(queue.end, 1);
         assert_eq!(queue.len, 0);
         println!("[ok]");
+
+        print!("Testing read empty queue ");
+        assert!(queue.read_header().is_err());
+        assert_matches!(queue.read_header().err().unwrap(), QueueError::QueueEmpty);
+        println!("[ok]");
+        
+        print!("Testing read empty queue data ");
+        assert!(queue.read_data(&mut buffer).is_err());
+        assert_matches!(queue.read_data(&mut buffer).err().unwrap(), QueueError::QueueEmpty);
+        println!("[ok]");
     }
 
     #[test_case]
@@ -357,6 +369,16 @@ mod test {
         assert_eq!(queue.start, 1);
         assert_eq!(queue.end, 1);
         assert_eq!(queue.len, 0);
+        println!("[ok]");
+        
+        print!("Testing read empty queue ");
+        assert!(queue.read_header().is_err());
+        assert_matches!(queue.read_header().err().unwrap(), QueueError::QueueEmpty);
+        println!("[ok]");
+        
+        print!("Testing read empty queue data ");
+        assert!(queue.read_data(&mut buffer).is_err());
+        assert_matches!(queue.read_data(&mut buffer).err().unwrap(), QueueError::QueueEmpty);
         println!("[ok]");
     }
 
