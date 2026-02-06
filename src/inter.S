@@ -26,6 +26,12 @@
 .globl _start
 .type _start, "function"
 
+.globl _enable_irq
+.type _enable_irq, "function"
+
+.globl _disable_irq
+.type _disable_irq, "function"
+
 
 _start:
     // copy data into memory
@@ -75,7 +81,7 @@ _sys_call:
     bl get_current_proc
     // check if currently running a process and if so, save the state
     movs r0, r0
-    beq 1f
+    beq 3f // if not running a process, the sys call is invalid
     // store unsaved process registers (r4 to r11)
     stm r0!, {r4-r7}
     mov r4, r8
@@ -87,9 +93,8 @@ _sys_call:
     mrs r1, psp
     // save stack pointer
     str r1, [r0]
-1:
-    // r8 -> service number
-    mov r0, r8
+    // first argument stack
+    mov r0, r1
     bl sys_call
     // if got null pointer (no process) wait for an interrupt and try again
 2:

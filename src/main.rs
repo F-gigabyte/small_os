@@ -6,7 +6,7 @@
 
 use core::{intrinsics::abort, panic::PanicInfo};
 
-use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, mutex::force_spinlock_unlock, nvic::{NVIC, irqs}, pll::PLL, proc::PROCESSES, reset::RESET, rosc::ROSC, scheduler::scheduler, system::SYSTEM, test_proc::test_func, timer::{TIMER, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
+use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, message_queue::{ASYNC_ENDPOINTS1, ASYNC_ENDPOINTS2, ASYNC_ENDPOINTS3, ASYNC_QUEUES1, ASYNC_QUEUES2, ASYNC_QUEUES3, SYNC_ENDPOINTS1, SYNC_ENDPOINTS2, SYNC_ENDPOINTS3, SYNC_QUEUES1, SYNC_QUEUES2, SYNC_QUEUES3}, mutex::force_spinlock_unlock, nvic::{NVIC, irqs}, pll::PLL, reset::RESET, rosc::ROSC, scheduler::scheduler, system::SYSTEM, test_proc::{test_func, test_func2, test_func3}, timer::{TIMER, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
 
 pub mod uart;
 pub mod reset;
@@ -28,12 +28,14 @@ pub mod scheduler;
 pub mod test_proc;
 pub mod sys_tick;
 pub mod system;
-pub mod channel;
+pub mod messages;
+pub mod message_queue;
 
 /// panic handler
 /// this function is called when a panic happens
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+    println!("{}", info);
     abort()
 }
 
@@ -91,29 +93,30 @@ pub extern "C" fn main() -> ! {
         let mut watchdog = WATCHDOG.lock(&cs);
         watchdog.enable_ticks();
         timer.remove_debug_pause();
-        timer.enable_irq(TimerIRQ::Timer0);
         let mut nvic = NVIC.lock(&cs);
         nvic.enable_irq(irqs::TIMER0);
         {
-            unsafe {
-                let len = (*(&raw const PROCESSES)).len();
-                for i in 0..len {
-                    PROCESSES[i].pid = i as u32 + 1;
-                }
-            }
-        }
-        {
-            let test_proc = unsafe {
-                &mut PROCESSES[0]
-            };
-            test_proc.init(test_func as *const () as u32, 0x20005000, 0);
             let mut scheduler = scheduler(&cs);
-            unsafe {
-                scheduler.add_process(&raw mut *test_proc);
-            }
+            let pid = unsafe {
+                scheduler.create_proc(0, test_func as *const () as u32, 0x20005000, 1, (&raw mut SYNC_QUEUES1).as_mut().unwrap(), &SYNC_ENDPOINTS1, (&raw mut ASYNC_QUEUES1).as_mut().unwrap(), &ASYNC_ENDPOINTS1).unwrap()
+            };
+            scheduler.schedule_process(pid).unwrap();
+            let pid = unsafe {
+                scheduler.create_proc(1, test_func2 as *const () as u32, 0x20004000, 0, (&raw mut SYNC_QUEUES2).as_mut().unwrap(), & SYNC_ENDPOINTS2, (&raw mut ASYNC_QUEUES2).as_mut().unwrap(), &ASYNC_ENDPOINTS2).unwrap()
+            };
+            scheduler.schedule_process(pid).unwrap();
+            let pid = unsafe {
+                scheduler.create_proc(2, test_func3 as *const () as u32, 0x20003000, 0, (&raw mut SYNC_QUEUES3).as_mut().unwrap(), & SYNC_ENDPOINTS3, (&raw mut ASYNC_QUEUES3).as_mut().unwrap(), &ASYNC_ENDPOINTS3).unwrap()
+            };
+            scheduler.schedule_process(pid).unwrap();
         }
         let mut sys = SYSTEM.lock(&cs);
         sys.send_pend();
+        timer.clear_irq(TimerIRQ::Timer0);
+        timer.clear_irq(TimerIRQ::Timer1);
+        timer.clear_irq(TimerIRQ::Timer2);
+        timer.clear_irq(TimerIRQ::Timer3);
+        timer.enable_irq(TimerIRQ::Timer0);
     }
     // SAFETY
     // IRQ has been setup and can now run

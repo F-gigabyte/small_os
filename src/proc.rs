@@ -1,16 +1,38 @@
 use core::ptr;
 
-const NUM_PROCESSES: usize = 4;
+use crate::message_queue::{AsyncMessageQueue, Endpoints, MessageQueue, SyncMessageQueue};
 
 mod proc_flags {
     pub const PRIORITY_SHIFT: usize = 0;
-    pub const RUNNING_SHIFT: usize = 8;
-    pub const RUNNABLE_SHIFT: usize = 9;
+    pub const STATE_SHIFT: usize = 8;
 
     pub const PRIORITY_MASK: u32 = 0xff << PRIORITY_SHIFT;
-    pub const RUNNING_MASK: u32 = 1 << RUNNING_SHIFT;
-    pub const RUNNABLE_MASK: u32 = 1 << RUNNABLE_SHIFT;
+    pub const STATE_MASK: u32 = 0x7 << STATE_SHIFT;
+}
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ProcState {
+    Free = 0,
+    Init = 1,
+    Scheduled = 2,
+    Running = 3,
+    Blocked = 4,
+    Dead = 5
+}
+
+impl TryFrom<u32> for ProcState {
+    type Error = u32;
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ProcState::Free),
+            1 => Ok(ProcState::Init),
+            2 => Ok(ProcState::Scheduled),
+            3 => Ok(ProcState::Running),
+            4 => Ok(ProcState::Blocked),
+            5 => Ok(ProcState::Dead),
+            _ => Err(value)
+        }
+    }
 }
 
 #[repr(C)]
@@ -27,7 +49,14 @@ pub struct Proc {
     pub psp: u32,
     pub flags: u32,
     pub next: *mut Proc,
-    pub wait_queue: *mut Proc
+    pub num_sync_queues: u32,
+    pub num_sync_endpoints: u32,
+    pub sync_queues: *mut SyncMessageQueue,
+    pub sync_endpoints: *const *mut SyncMessageQueue,
+    pub num_async_queues: u32,
+    pub num_async_endpoints: u32,
+    pub async_queues: *mut AsyncMessageQueue,
+    pub async_endpoints: *const *mut AsyncMessageQueue
 }
 
 impl Proc {
@@ -45,32 +74,26 @@ impl Proc {
             psp: 0, // sp (0x24)
             flags: 0, // (0x28) 
             next: ptr::null_mut(), // (0x2c)
-            wait_queue: ptr::null_mut()  // (0x30)
+            num_sync_queues: 0, // (0x30)
+            num_sync_endpoints: 0, // (0x34)
+            sync_queues: ptr::null_mut(), // (0x38)
+            sync_endpoints: ptr::null(), // (0x3c)
+            num_async_queues: 0, // (0x40)
+            num_async_endpoints: 0, // (0x44)
+            async_queues: ptr::null_mut(), // (0x48)
+            async_endpoints: ptr::null() // (0x4c)
         }
     }
 
-    pub fn set_running(&mut self, running: bool) {
-        if running {
-            self.flags |= proc_flags::RUNNING_MASK;
-        } else {
-            self.flags &= !proc_flags::RUNNING_MASK;
-        }
-    }
-
-    pub fn running(&self) -> bool {
-        self.flags & proc_flags::RUNNING_MASK != 0
-    }
-
-    pub fn sleep(&mut self) {
-        self.flags &= !proc_flags::RUNNABLE_MASK
+    pub fn set_state(&mut self, state: ProcState) {
+        self.flags &= !proc_flags::STATE_MASK;
+        self.flags |= (state as u32) << proc_flags::STATE_SHIFT;
     }
     
-    pub fn wake(&mut self) {
-        self.flags |= proc_flags::RUNNABLE_MASK
-    }
-
-    pub fn runnable(&self) -> bool {
-        self.flags & proc_flags::RUNNABLE_MASK != 0
+    /// gets the state
+    pub fn get_state(&self) -> ProcState {
+        // On error, free the process
+        ProcState::try_from((self.flags & proc_flags::STATE_MASK) >> proc_flags::STATE_SHIFT).unwrap_or(ProcState::Free)
     }
 
     pub fn priority(&self) -> u8 {
@@ -119,7 +142,20 @@ impl Proc {
         }
     }
 
-    pub fn init(&mut self, entry: u32, mut sp: u32, priority: u8) {
+    // SAFETY
+    // `entry` must be a valid execution point, `sp` must be a valid stack, `queues` must be a pointer to
+    // an array of `num_queues` queues
+    pub unsafe fn init(
+        &mut self, 
+        pid: u32, 
+        entry: u32, 
+        mut sp: u32, 
+        priority: u8, 
+        sync_queues: &'static mut [SyncMessageQueue], 
+        sync_endpoints: &'static Endpoints<SyncMessageQueue>,
+        async_queues: &'static mut [AsyncMessageQueue],
+        async_endpoints: &'static Endpoints<AsyncMessageQueue>,
+        ) {
         sp -= 8 * 4;
         let stack: &mut [u32; 8] = unsafe {
             // reserve 8 registers for initial setup
@@ -127,12 +163,19 @@ impl Proc {
         };
         stack[6] = entry;
         stack[7] = 0x01000000; // set thumb mode but nothing else
+        self.pid = pid;
         self.psp = sp;
-        self.flags = (priority as u32) << proc_flags::PRIORITY_SHIFT | proc_flags::RUNNABLE_MASK;
+        self.flags = (priority as u32) << proc_flags::PRIORITY_SHIFT | ((ProcState::Init as u32) << proc_flags::STATE_SHIFT);
+        self.sync_queues = sync_queues.as_mut_ptr();
+        self.num_sync_queues = sync_queues.len() as u32;
+        self.sync_endpoints = sync_endpoints.as_ptr();
+        self.num_sync_endpoints = sync_endpoints.len() as u32;
+        self.async_queues = async_queues.as_mut_ptr();
+        self.num_async_queues = async_queues.len() as u32;
+        self.async_endpoints = async_endpoints.as_ptr();
+        self.num_async_endpoints = async_endpoints.len() as u32;
     }
 }
 
 unsafe impl Send for Proc {}
 unsafe impl Sync for Proc {}
-
-pub static mut PROCESSES: [Proc; NUM_PROCESSES] = [const { Proc::new() }; NUM_PROCESSES];

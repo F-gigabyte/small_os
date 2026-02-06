@@ -61,7 +61,6 @@ pub struct Timer {
     registers: UniqueMmioPointer<'static, TimerRegisters>,
     set_reg: UniqueMmioPointer<'static, TimerRegisters>,
     clear_reg: UniqueMmioPointer<'static, TimerRegisters>,
-    counts: [u32; 4],
 }
 
 #[derive(Clone, Copy)]
@@ -79,7 +78,6 @@ impl Timer {
                 registers: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base)).unwrap()),
                 set_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_SET_BITS)).unwrap()),
                 clear_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_CLR_BITS)).unwrap()),
-                counts: [0; 4]
             }
         }
     }
@@ -94,42 +92,40 @@ impl Timer {
         (upper as u64) << 32 | (lower as u64)
     }
 
-    pub fn set_count(&mut self, timer: TimerIRQ, micros: u32) {
-        self.counts[timer as usize] = micros;
-        match timer {
-            TimerIRQ::Timer0 => self.set_count0(),
-            TimerIRQ::Timer1 => self.set_count1(),
-            TimerIRQ::Timer2 => self.set_count2(),
-            TimerIRQ::Timer3 => self.set_count3(),
-        }
-    }
-    
     #[inline(always)]
-    fn set_count0(&mut self) {
-        let time = (self.read_time() & (u32::MAX as u64)) as u32;
-        let time = time.wrapping_add(self.counts[0]);
+    pub fn set_count0(&mut self, count: u32) {
+        // do this step so we lock the time registers in the middle
+        let lower = field!(self.registers, timerawl).read();
+        let time = lower.wrapping_add(count);
         field!(self.registers, alarm0).write(time);
+        field!(self.registers, timerawh).read();
     }
     
     #[inline(always)]
-    fn set_count1(&mut self) {
-        let time = (self.read_time() & (u32::MAX as u64)) as u32;
-        let time = time.wrapping_add(self.counts[1]);
+    pub fn set_count1(&mut self, count: u32) {
+        // do this step so we lock the time registers in the middle
+        let lower = field!(self.registers, timerawl).read();
+        let time = lower.wrapping_add(count);
         field!(self.registers, alarm1).write(time);
+        field!(self.registers, timerawh).read();
     }
     
     #[inline(always)]
-    fn set_count2(&mut self) {
-        let time = (self.read_time() & (u32::MAX as u64)) as u32;
-        let time = time.wrapping_add(self.counts[2]);
+    pub fn set_count2(&mut self, count: u32) {
+        // do this step so we lock the time registers in the middle
+        let lower = field!(self.registers, timerawl).read();
+        let time = lower.wrapping_add(count);
         field!(self.registers, alarm2).write(time);
+        field!(self.registers, timerawh).read();
     }
     
     #[inline(always)]
-    fn set_count3(&mut self) {
-        let time = (self.read_time() & (u32::MAX as u64)) as u32;
-        let time = time.wrapping_add(self.counts[3]);
+    pub fn set_count3(&mut self, count: u32) {
+        // do this step so we lock the time registers in the middle
+        let lower = field!(self.registers, timerawl).read();
+        let time = lower.wrapping_add(count);
         field!(self.registers, alarm3).write(time);
+        field!(self.registers, timerawh).read();
     }
 
     #[inline(always)]

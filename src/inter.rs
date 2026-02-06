@@ -2,8 +2,140 @@ use core::{arch::asm, marker::PhantomData, ptr};
 
 use crate::{nvic::NVIC, println, proc::Proc, scheduler::{QUANTUM_MICROS, get_current_proc, scheduler}, sys_tick::SYS_TICK, system::{SYSTEM, SysIRQ}, timer::{TIMER, TimerIRQ}};
 
-unsafe extern "C" {
-    fn schedule(proc: *mut Proc);
+// https://aticleworld.com/arm-function-call-stack-frame/ accessed 4/02/2026 mentions r0 to r3, r12
+// and lr (r14) are caller saved so use r0 to r3 as arguments and r12 as sys call number so
+// performing a sys call is like calling a function
+// Inputs
+// - r12 -> sys call number
+// - r0 -> arg 1
+// - r1 -> arg 2
+// - r2 -> arg 3
+// - r3 -> arg 4
+// Outputs
+// - r12 -> error code (0 for success)
+// - r0 -> out 0
+// - r1 -> out 1
+// - r2 -> out 2
+// - r3 -> out 3
+#[derive(Debug)]
+pub enum SysCall {
+    // 0
+    KPrint {
+        data: *mut u8,
+        len: u32
+    },
+    // 1
+    Exit {
+        code: u32
+    },
+    // 2
+    WaitIRQ {
+        irq: u32
+    },
+    // 3
+    Send {
+        endpoint: u32,
+        tag: u32,
+        len: u32,
+        data: u32
+    },
+    // 4
+    SendAsync {
+        endpoint: u32,
+        tag: u32,
+        len: u32,
+        data: u32
+    },
+    // 5
+    Header {
+        queue: u32
+    },
+    // 6
+    HeaderAsync {
+        queue: u32
+    },
+    // 7
+    HeaderNonBlocking {
+        queue: u32,
+    },
+    // 8
+    HeaderAsyncNonBlocking {
+        queue: u32,
+    },
+    // 9
+    Receive {
+        queue: u32,
+        len: u32,
+        buffer: *mut u8
+    },
+    // 10
+    ReceiveAsync {
+        queue: u32,
+        len: u32,
+        buffer: *mut u8
+    },
+    // 11
+    Reply {
+        queue: u32,
+        msg: u32
+    },
+}
+
+impl TryFrom<&StackTrace> for SysCall {
+    type Error = ();
+    fn try_from(stack: &StackTrace) -> Result<Self, ()> {
+        match stack.r12 {
+            0 => Ok(SysCall::KPrint { 
+                data: ptr::with_exposed_provenance_mut(stack.r0 as usize), 
+                len: stack.r1 
+            }),
+            1 => Ok(SysCall::Exit { 
+                code: stack.r0
+            }),
+            2 => Ok(SysCall::WaitIRQ { 
+                irq: stack.r1 
+            }),
+            3 => Ok(SysCall::Send { 
+                endpoint: stack.r0,
+                tag: stack.r1,
+                len: stack.r2,
+                data: stack.r3
+            }),
+            4 => Ok(SysCall::SendAsync { 
+                endpoint: stack.r0,
+                tag: stack.r1,
+                len: stack.r2,
+                data: stack.r3
+            }),
+            5 => Ok(SysCall::Header { 
+                queue: stack.r0,
+            }),
+            6 => Ok(SysCall::HeaderAsync { 
+                queue: stack.r0 
+            }),
+            7 => Ok(SysCall::HeaderNonBlocking { 
+                queue: stack.r0, 
+            }),
+            8 => Ok(SysCall::HeaderAsyncNonBlocking {
+                queue: stack.r0,
+            }),
+            9 => Ok(SysCall::Receive { 
+                queue: stack.r0, 
+                len: stack.r1, 
+                buffer: ptr::with_exposed_provenance_mut(stack.r2 as usize) 
+            }),
+            10 => Ok(SysCall::ReceiveAsync { 
+                queue: stack.r0, 
+                len: stack.r1, 
+                buffer: ptr::with_exposed_provenance_mut(stack.r2 as usize) 
+            }),
+            11 => Ok(SysCall::Reply { 
+                queue: stack.r0, 
+                msg: stack.r1 
+            }),
+            _ => Err(())
+        }
+    }
 }
 
 #[repr(C)]
@@ -82,49 +214,153 @@ pub extern "C" fn irq_handler(irq: u8) {
     scheduler.wake(irq);
 }
 
+fn do_sys_call(sys_call: SysCall, stack: &mut StackTrace, cs: &CS) -> Result<(), u32> {
+    match sys_call {
+        // kernel print
+        SysCall::KPrint { 
+            data, 
+            len 
+        } => {
+            let text: &[u8] = unsafe {
+                & *ptr::slice_from_raw_parts(data, len as usize)
+            };
+            if let Ok(text) = str::from_utf8(text) {
+                println!("{}", text);
+                stack.r0 = text.len() as u32;
+                Ok(())
+            } else {
+                Err(0)
+            }
+        },
+        // exit
+        SysCall::Exit { 
+            code 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.terminate_current();
+            Ok(())
+        },
+        // wait for IRQ
+        SysCall::WaitIRQ { 
+            irq 
+        } => {
+            if irq < 32 {
+                let mut scheduler = scheduler(&cs);
+                scheduler.sleep_irq(irq as u8);
+                let mut nvic = NVIC.lock(&cs);
+                // enable the IRQ for firing
+                nvic.enable_irq(irq as u8);
+                Ok(())
+            } else {
+                Err(0)
+            }
+        },
+        // send message
+        SysCall::Send { 
+            endpoint,  
+            tag,
+            len,
+            data
+        } => {
+            let mut scheduler = scheduler(cs);
+            unsafe {
+                scheduler.send(endpoint, tag, len, data).map_err(|err| u32::from(err))
+            }
+        },
+        SysCall::SendAsync { 
+            endpoint, 
+            tag, 
+            len, 
+            data 
+        } => {
+            let mut scheduler = scheduler(cs);
+            unsafe {
+                scheduler.send_async(endpoint, tag, len, data).map_err(|err| u32::from(err))
+            }
+        },
+        SysCall::Header { 
+            queue 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.header(queue, true).map_err(|err| u32::from(err))
+        },
+        SysCall::HeaderAsync { 
+            queue 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.header_async(queue, true).map_err(|err| u32::from(err))
+        },
+        SysCall::HeaderNonBlocking { 
+            queue 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.header(queue, false).map_err(|err| u32::from(err))
+        },
+        SysCall::HeaderAsyncNonBlocking { 
+            queue 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.header_async(queue, false).map_err(|err| u32::from(err))
+        },
+        SysCall::Receive { 
+            queue, 
+            len, 
+            buffer 
+        } => {
+            let mut scheduler = scheduler(cs);
+            unsafe {
+                scheduler.receive_message(queue, len, buffer).map_err(|err| u32::from(err))
+            }
+        },
+        SysCall::ReceiveAsync { 
+            queue, 
+            len, 
+            buffer 
+        } => {
+            let mut scheduler = scheduler(cs);
+            unsafe {
+                scheduler.receive_message_async(queue, len, buffer).map_err(|err| u32::from(err))
+            }
+        },
+        SysCall::Reply { 
+            queue, 
+            msg 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.reply(queue, msg).map_err(|err| u32::from(err))
+        },
+    }
+}
+
 #[unsafe(no_mangle)]
-pub extern "C" fn sys_call(service: u32, stack: *mut StackTrace) -> *mut Proc {
+pub extern "C" fn sys_call(stack: *mut StackTrace) -> *mut Proc {
     let stack = unsafe {
         &mut *stack
     };
     let cs = unsafe {
         CS::new()
     };
-    if service == 0 {
-        let len = stack.r1 as usize;
-        let text: &[u8] = unsafe {
-            & *ptr::slice_from_raw_parts(ptr::with_exposed_provenance(stack.r0 as usize), len)
-        };
-        if let Ok(text) = str::from_utf8(text) {
-            println!("{}", text);
-            stack.r0 = 0;
-        } else {
-            stack.r0 = 1;
+    match SysCall::try_from(&*stack) {
+        Ok(sys_call) => {
+            match do_sys_call(sys_call, stack, &cs) {
+                Ok(_) => {
+                    // success
+                    stack.r12 = 0;
+                },
+                Err(err) => {
+                    // failure
+                    stack.r12 = err + 2;
+                }
+            }
+        },
+        Err(_) => {
+            // unknown sys call
+            stack.r12 = 1;
         }
-    } else if service == 1 {
-        let mut scheduler = scheduler(&cs);
-        stack.r0 = 0;
-        scheduler.terminate_current();
-    } else if service == 2 {
-        if stack.r0 < 32 {
-            let mut scheduler = scheduler(&cs);
-            scheduler.sleep_irq(stack.r0 as u8);
-            let mut nvic = NVIC.lock(&cs);
-            // enable the IRQ for firing
-            nvic.enable_irq(stack.r0 as u8);
-            stack.r0 = 0;
-        } else {
-            stack.r0 = 1;
-        }
-    } else if service == 3 {
-
     }
-    else {
-        stack.r0 = 2;
-    }
-    unsafe {
-        get_current_proc()
-    }
+    let mut scheduler = scheduler(&cs);
+    scheduler.next_process();
+    scheduler.get_current()
 }
 
 #[unsafe(no_mangle)]
@@ -165,15 +401,15 @@ pub unsafe extern "C" fn do_proc_switch() -> *mut Proc {
 fn proc_switch(cs: CS) -> *mut Proc {
     let current;
     {
-        let mut timer = TIMER.lock(&cs);
         let mut scheduler = scheduler(&cs);
+        scheduler.yield_current();
         scheduler.next_process();
         current = unsafe {
             get_current_proc()
         };
-        timer.set_count(TimerIRQ::Timer0, QUANTUM_MICROS);
     }
-    drop(cs);
+    let mut timer = TIMER.lock(&cs);
+    timer.set_count0(QUANTUM_MICROS);
     current
 }
 

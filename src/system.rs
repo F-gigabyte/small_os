@@ -103,6 +103,11 @@ impl System {
     pub fn send_pend(&mut self) {
         field!(self.registers, inter_ctrl_state).write(inter_ctrl_state_register::PEND_SV_SET_MASK);
     }
+
+    #[inline(always)]
+    pub fn get_vtor(&mut self) -> u32 {
+        field!(self.registers, vtor).read()
+    }
 }
 
 unsafe impl Send for System {}
