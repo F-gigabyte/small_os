@@ -1,8 +1,12 @@
 // use core intrinsics 
 #![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test_runner)]
 
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
 use core::{intrinsics::abort, panic::PanicInfo};
 
@@ -39,10 +43,28 @@ fn panic(info: &PanicInfo) -> ! {
     abort()
 }
 
+/// An example test to check tests are working
+#[test_case]
+fn passes() {
+    print!("Asserting true ");
+    assert!(true);
+    println!("[ok]");
+}
+
 /// Stage 2 bootloader
 #[unsafe(link_section = ".bootloader")]
 #[used]
 pub static BOOTLOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
+
+/// Test framework which runs all the tests
+/// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+#[cfg(test)]
+pub fn test_runner(tests: &[&dyn Fn()]) {
+    println!("Running {} tests", tests.len());
+    for test in tests {
+        test();
+    }
+}
 
 /// Program entry point
 /// Disables mangling so it can be called from assembly
@@ -111,11 +133,13 @@ pub extern "C" fn main() -> ! {
             scheduler.schedule_process(pid).unwrap();
         }
         let mut sys = SYSTEM.lock(&cs);
+        #[cfg(not(test))]
         sys.send_pend();
         timer.clear_irq(TimerIRQ::Timer0);
         timer.clear_irq(TimerIRQ::Timer1);
         timer.clear_irq(TimerIRQ::Timer2);
         timer.clear_irq(TimerIRQ::Timer3);
+        #[cfg(not(test))]
         timer.enable_irq(TimerIRQ::Timer0);
     }
     // SAFETY
@@ -123,6 +147,7 @@ pub extern "C" fn main() -> ! {
     unsafe {
         enable_irq();
     }
-    println!("Completed Setup");
+    #[cfg(test)]
+    test_main();
     loop {}
 }
