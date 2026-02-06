@@ -10,7 +10,7 @@
 
 use core::{intrinsics::abort, panic::PanicInfo};
 
-use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, message_queue::{ASYNC_ENDPOINTS1, ASYNC_ENDPOINTS2, ASYNC_ENDPOINTS3, ASYNC_QUEUES1, ASYNC_QUEUES2, ASYNC_QUEUES3, SYNC_ENDPOINTS1, SYNC_ENDPOINTS2, SYNC_ENDPOINTS3, SYNC_QUEUES1, SYNC_QUEUES2, SYNC_QUEUES3}, mutex::force_spinlock_unlock, nvic::{NVIC, irqs}, pll::PLL, reset::RESET, rosc::ROSC, scheduler::scheduler, system::SYSTEM, test_proc::{test_func, test_func2, test_func3}, timer::{TIMER, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
+use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, message_queue::{SYNC_ENDPOINTS1, SYNC_ENDPOINTS2, SYNC_QUEUES1, SYNC_QUEUES2}, mutex::force_spinlock_unlock, nvic::{NVIC, irqs}, pll::PLL, reset::RESET, rosc::ROSC, scheduler::scheduler, system::SYSTEM, test_proc::{test_func, test_func2, test_func3}, timer::{TIMER, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
 
 pub mod uart;
 pub mod reset;
@@ -120,15 +120,15 @@ pub extern "C" fn main() -> ! {
         {
             let mut scheduler = scheduler(&cs);
             let pid = unsafe {
-                scheduler.create_proc(0, test_func as *const () as u32, 0x20005000, 1, (&raw mut SYNC_QUEUES1).as_mut().unwrap(), &SYNC_ENDPOINTS1, (&raw mut ASYNC_QUEUES1).as_mut().unwrap(), &ASYNC_ENDPOINTS1).unwrap()
+                scheduler.create_proc(0, test_func as *const () as u32, 0x20005000, 1, Some((&raw mut SYNC_QUEUES1).as_mut().unwrap()), Some(&SYNC_ENDPOINTS1), None, None).unwrap()
             };
             scheduler.schedule_process(pid).unwrap();
             let pid = unsafe {
-                scheduler.create_proc(1, test_func2 as *const () as u32, 0x20004000, 0, (&raw mut SYNC_QUEUES2).as_mut().unwrap(), & SYNC_ENDPOINTS2, (&raw mut ASYNC_QUEUES2).as_mut().unwrap(), &ASYNC_ENDPOINTS2).unwrap()
+                scheduler.create_proc(1, test_func2 as *const () as u32, 0x20004000, 0, Some((&raw mut SYNC_QUEUES2).as_mut().unwrap()), Some(&SYNC_ENDPOINTS2), None, None).unwrap()
             };
             scheduler.schedule_process(pid).unwrap();
             let pid = unsafe {
-                scheduler.create_proc(2, test_func3 as *const () as u32, 0x20003000, 0, (&raw mut SYNC_QUEUES3).as_mut().unwrap(), & SYNC_ENDPOINTS3, (&raw mut ASYNC_QUEUES3).as_mut().unwrap(), &ASYNC_ENDPOINTS3).unwrap()
+                scheduler.create_proc(2, test_func3 as *const () as u32, 0x20003000, 0, None, None, None, None).unwrap()
             };
             scheduler.schedule_process(pid).unwrap();
         }

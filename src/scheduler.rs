@@ -52,10 +52,10 @@ impl Scheduler {
         entry: u32, 
         sp: u32, 
         priority: u8, 
-        sync_queues: &'static mut [SyncMessageQueue], 
-        sync_endpoints: &'static Endpoints<SyncMessageQueue>,
-        async_queues: &'static mut [AsyncMessageQueue], 
-        async_endpoints: &'static Endpoints<AsyncMessageQueue>
+        sync_queues: Option<&'static mut [SyncMessageQueue]>, 
+        sync_endpoints: Option<&'static Endpoints<SyncMessageQueue>>,
+        async_queues: Option<&'static mut [AsyncMessageQueue]>, 
+        async_endpoints: Option<&'static Endpoints<AsyncMessageQueue>>
         ) -> Result<u32, ProcError> {
         if (pid as usize) >= self.processes.len() {
             return Err(ProcError::InvalidPID(pid));
@@ -89,6 +89,11 @@ impl Scheduler {
         let proc = unsafe {
             &mut *proc
         };
+        // Check proc is still alive and if not free it
+        // This is safe to do as proc isn't referenced anywhere else
+        if proc.get_state() == ProcState::Dead {
+            proc.set_state(ProcState::Free);
+        }
         if !self.current.is_null() {
             let current = unsafe {
                 &mut *self.current
@@ -173,7 +178,8 @@ impl Scheduler {
         // if process with same priority as current, select it to be scheduled next or else
         // stick with current
         for (start, end) in self.start_proc[..priority].iter_mut().zip(self.end_proc[..priority].iter_mut()) {
-            if !start.is_null() {
+            // when goin to start of loop, it's because the last selected process is dead
+            while !start.is_null() {
                 // SAFETY
                 // entry is not null and proc should have been initialised
                 let proc = unsafe {
@@ -183,6 +189,11 @@ impl Scheduler {
                 // if removing last process, set end to null
                 if *end == &raw mut *proc {
                     *end = ptr::null_mut();
+                }
+                // If process is dead, free it as it's not referenced by anything else
+                if proc.get_state() == ProcState::Dead {
+                    proc.set_state(ProcState::Free);
+                    continue;
                 }
                 proc.set_state(ProcState::Running);
                 self.switch_out_current();
@@ -234,6 +245,8 @@ impl Scheduler {
                 unsafe {
                     self.schedule_internal(proc);
                 }
+            } else if proc.get_state() == ProcState::Dead {
+                proc.set_state(ProcState::Free);
             }
             current = next;
         }
@@ -294,7 +307,7 @@ impl Scheduler {
             let data = unsafe {
                 slice::from_raw_parts(ptr::with_exposed_provenance_mut(data as usize), len as usize)
             };
-            if let Some(msg) = AsyncMessage::new(&raw mut *current, tag, data) {
+            if let Some(msg) = AsyncMessage::new(current.pid, tag, data) {
                 queue.send(msg)?;
                 if !queue.blocked.is_null() {
                     let proc = unsafe {
@@ -330,7 +343,7 @@ impl Scheduler {
             match queue.read_header() {
                 Ok(header) => {
                     let sender = unsafe {
-                        & *header.sender
+                        & *header.sender.proc
                     };
                     current.set_r0(sender.pid);
                     current.set_r1(header.tag);
@@ -364,10 +377,10 @@ impl Scheduler {
             };
             match queue.read_header() {
                 Ok(header) => {
-                    let sender = unsafe {
-                        & *header.sender
+                    let pid = unsafe {
+                        header.sender.pid
                     };
-                    current.set_r0(sender.pid);
+                    current.set_r0(pid);
                     current.set_r1(header.tag);
                     current.set_r2(header.len);
                     Ok(())
@@ -455,6 +468,26 @@ impl Scheduler {
     pub fn get_current(&mut self) -> *mut Proc {
         self.current
     }
+
+    pub fn kill(&mut self, pid: u32) -> Result<(), ProcError> {
+        if (pid as usize) >= self.processes.len() {
+            return Err(ProcError::InvalidPID(pid));
+        }
+        let proc = self.processes[pid as usize].get_mut();
+        let state = proc.get_state();
+        if matches!(state, ProcState::Blocked | ProcState::Scheduled) {
+            // set proc to dead as may be referenced by other processes
+            proc.set_state(ProcState::Dead);
+            Ok(())
+        } else if state == ProcState::Running {
+            // free proc as not referenced anywhere else
+            proc.set_state(ProcState::Init);
+            self.current = ptr::null_mut();
+            Ok(())
+        } else {
+            Err(ProcError::InvalidState)
+        }
+    }
 }
 
 unsafe impl Send for Scheduler {}
@@ -499,4 +532,9 @@ pub unsafe fn get_current_proc() -> *mut Proc {
         CS::new()
     };
     scheduler(&cs).get_current()
+}
+
+mod test {
+    use super::*;
+
 }

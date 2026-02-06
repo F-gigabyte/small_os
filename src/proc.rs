@@ -92,8 +92,8 @@ impl Proc {
     
     /// gets the state
     pub fn get_state(&self) -> ProcState {
-        // On error, free the process
-        ProcState::try_from((self.flags & proc_flags::STATE_MASK) >> proc_flags::STATE_SHIFT).unwrap_or(ProcState::Free)
+        // On error, panic
+        ProcState::try_from((self.flags & proc_flags::STATE_MASK) >> proc_flags::STATE_SHIFT).expect("Have invalid process state.")
     }
 
     pub fn priority(&self) -> u8 {
@@ -151,10 +151,10 @@ impl Proc {
         entry: u32, 
         mut sp: u32, 
         priority: u8, 
-        sync_queues: &'static mut [SyncMessageQueue], 
-        sync_endpoints: &'static Endpoints<SyncMessageQueue>,
-        async_queues: &'static mut [AsyncMessageQueue],
-        async_endpoints: &'static Endpoints<AsyncMessageQueue>,
+        mut sync_queues: Option<&'static mut [SyncMessageQueue]>, 
+        sync_endpoints: Option<&'static Endpoints<SyncMessageQueue>>,
+        mut async_queues: Option<&'static mut [AsyncMessageQueue]>,
+        async_endpoints: Option<&'static Endpoints<AsyncMessageQueue>>,
         ) {
         sp -= 8 * 4;
         let stack: &mut [u32; 8] = unsafe {
@@ -166,14 +166,14 @@ impl Proc {
         self.pid = pid;
         self.psp = sp;
         self.flags = (priority as u32) << proc_flags::PRIORITY_SHIFT | ((ProcState::Init as u32) << proc_flags::STATE_SHIFT);
-        self.sync_queues = sync_queues.as_mut_ptr();
-        self.num_sync_queues = sync_queues.len() as u32;
-        self.sync_endpoints = sync_endpoints.as_ptr();
-        self.num_sync_endpoints = sync_endpoints.len() as u32;
-        self.async_queues = async_queues.as_mut_ptr();
-        self.num_async_queues = async_queues.len() as u32;
-        self.async_endpoints = async_endpoints.as_ptr();
-        self.num_async_endpoints = async_endpoints.len() as u32;
+        self.sync_queues = sync_queues.as_mut().map(|sync_queues| sync_queues.as_mut_ptr()).unwrap_or(ptr::null_mut());
+        self.num_sync_queues = sync_queues.map(|sync_queues| sync_queues.len()).unwrap_or(0) as u32;
+        self.sync_endpoints = sync_endpoints.map(|sync_endpoints| sync_endpoints.as_ptr()).unwrap_or(ptr::null());
+        self.num_sync_endpoints = sync_endpoints.map(|sync_endpoints| sync_endpoints.len()).unwrap_or(0) as u32;
+        self.async_queues = async_queues.as_mut().map(|async_queues| async_queues.as_mut_ptr()).unwrap_or(ptr::null_mut());
+        self.num_async_queues = async_queues.map(|async_queues| async_queues.len()).unwrap_or(0) as u32;
+        self.async_endpoints = async_endpoints.map(|async_endpoints| async_endpoints.as_ptr()).unwrap_or(ptr::null_mut());
+        self.num_async_endpoints = async_endpoints.map(|async_endpoints| async_endpoints.len()).unwrap_or(0) as u32;
     }
 }
 

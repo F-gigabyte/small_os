@@ -18,9 +18,13 @@ pub union MessageBody {
     pub indirect: *const u8
 }
 
-#[derive(Debug, Clone)]
+pub union MessageSender {
+    pub proc: *mut Proc,
+    pub pid: u32
+}
+
 pub struct MessageHeader {
-    pub sender: *mut Proc,
+    pub sender: MessageSender,
     pub tag: u32,
     pub len: u32,
 }
@@ -41,11 +45,13 @@ impl Message {
                 if i >= len as usize {
                     break;
                 }
-                direct[i + 4] = *byte;
+                direct[i] = *byte;
             }
             Some(Message { 
                 header: MessageHeader { 
-                    sender, 
+                    sender: MessageSender{
+                        proc: sender
+                    }, 
                     tag, 
                     len 
                 },
@@ -62,7 +68,9 @@ impl Message {
             direct.copy_from_slice(data);
             Message { 
                 header: MessageHeader { 
-                    sender, 
+                    sender: MessageSender {
+                        proc: sender
+                    }, 
                     tag, 
                     len: data.len() as u32 
                 }, 
@@ -73,7 +81,9 @@ impl Message {
         } else {
             Message { 
                 header: MessageHeader { 
-                    sender, 
+                    sender: MessageSender {
+                        proc: sender
+                    }, 
                     tag, 
                     len: data.len() as u32 
                 }, 
@@ -83,28 +93,151 @@ impl Message {
             }
         }
     }
+
+    pub fn clone_header(&self) -> MessageHeader {
+        let proc = unsafe {
+            self.header.sender.proc
+        };
+        MessageHeader { 
+            sender: MessageSender {
+                proc
+
+            }, 
+            tag: self.header.tag, 
+            len: self.header.len 
+        }
+    }
 }
 
 pub struct AsyncMessage {
     pub header: MessageHeader,
-    pub body: [u8; MESSAGE_DIRECT_LEN]
+    pub body: [u8; MAX_ASYNC_MESSAGE_LEN]
 }
 
 impl AsyncMessage {
-    pub fn new(sender: *mut Proc, tag: u32, data: &[u8]) -> Option<Self> {
-        if data.len() > MESSAGE_DIRECT_LEN {
+    pub fn new(pid: u32, tag: u32, data: &[u8]) -> Option<Self> {
+        if data.len() > MAX_ASYNC_MESSAGE_LEN {
             None
         } else {
-            let mut body = [0; MESSAGE_DIRECT_LEN];
+            let mut body = [0; MAX_ASYNC_MESSAGE_LEN];
             body[..data.len()].copy_from_slice(data);
             Some(Self {
                 header: MessageHeader { 
-                    sender, 
+                    sender: MessageSender {
+                        pid
+                    }, 
                     tag, 
                     len: data.len() as u32 
                 },
                 body
             })
         }
+    }
+
+    pub fn clone_header(&self) -> MessageHeader {
+        let pid = unsafe {
+            self.header.sender.pid
+        };
+        MessageHeader { 
+            sender: MessageSender {
+                pid
+            }, 
+            tag: self.header.tag, 
+            len: self.header.len 
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::print;
+    use crate::println;
+    use crate::proc::Proc;
+
+    #[test_case]
+    fn test_message_create() {
+        let mut proc = Proc::new();
+        proc.pid = 1;
+        print!("Testing direct message creation ");
+        let msg = Message::direct(&raw mut proc, 0, 8, 4); 
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        unsafe {
+            assert_eq!(msg.header.sender.proc, &raw mut proc);
+        }
+        assert_eq!(msg.header.len, 4);
+        assert_eq!(msg.header.tag, 0);
+        unsafe {
+            assert_eq!(msg.body.direct.len(), 4);
+            // should be 0, 0, 0, 8 bytes for big endian
+            assert_eq!(msg.body.direct[0], 0);
+            assert_eq!(msg.body.direct[1], 0);
+            assert_eq!(msg.body.direct[2], 0);
+            assert_eq!(msg.body.direct[3], 8);
+        }
+        println!("[ok]");
+        print!("Testing direct message creation (fails) ");
+        assert!(Message::direct(&raw mut proc, 0, 8, 20).is_none());
+        println!("[ok]");
+    }
+    
+    #[test_case]
+    fn test_large_message_create() {
+        let mut proc = Proc::new();
+        proc.pid = 1;
+        print!("Testing indirect message creation ");
+        let data = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+        let msg = Message::indirect(&raw mut proc, 0, &data);
+        unsafe {
+            assert_eq!(msg.header.sender.proc, &raw mut proc);
+        }
+        assert_eq!(msg.header.len, 10);
+        assert_eq!(msg.header.tag, 0);
+        let body = unsafe {
+            slice::from_raw_parts(msg.body.indirect, 10)
+        };
+        assert_eq!(body[0], 10);
+        assert_eq!(body[1], 20);
+        assert_eq!(body[2], 30);
+        assert_eq!(body[3], 40);
+        assert_eq!(body[4], 50);
+        assert_eq!(body[5], 60);
+        assert_eq!(body[6], 70);
+        assert_eq!(body[7], 80);
+        assert_eq!(body[8], 90);
+        assert_eq!(body[9], 100);
+        println!("[ok]");
+    }
+    
+    #[test_case]
+    fn test_async_message_create() {
+        let mut proc = Proc::new();
+        proc.pid = 1;
+        print!("Testing async message creation ");
+        let msg = AsyncMessage::new(proc.pid, 0, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]); 
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        unsafe {
+            assert_eq!(msg.header.sender.pid, proc.pid);
+        }
+        assert_eq!(msg.header.len, 10);
+        assert_eq!(msg.header.tag, 0);
+        assert_eq!(msg.body.len(), MAX_ASYNC_MESSAGE_LEN);
+        assert_eq!(msg.body[0], 1);
+        assert_eq!(msg.body[1], 2);
+        assert_eq!(msg.body[2], 3);
+        assert_eq!(msg.body[3], 4);
+        assert_eq!(msg.body[4], 5);
+        assert_eq!(msg.body[5], 6);
+        assert_eq!(msg.body[6], 7);
+        assert_eq!(msg.body[7], 8);
+        assert_eq!(msg.body[8], 9);
+        assert_eq!(msg.body[9], 10);
+        println!("[ok]");
+        print!("Testing async message creation (fails) ");
+        assert!(AsyncMessage::new(proc.pid, 0, &[0; MAX_ASYNC_MESSAGE_LEN + 1]).is_none());
+        println!("[ok]");
     }
 }

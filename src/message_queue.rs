@@ -68,7 +68,9 @@ impl SyncMessageQueue {
             };
             self.len -= 1;
             self.start = (self.start + 1) % (self.buffer.len() as u32);
-            Ok(msg.header.sender)
+            unsafe {
+                Ok(msg.header.sender.proc)
+            }
         } else {
             Err(QueueError::QueueEmpty)
         }
@@ -94,7 +96,7 @@ impl MessageQueue for SyncMessageQueue {
             let res = unsafe {
                 self.buffer[self.start as usize].assume_init_ref()
             };
-            Ok(res.header.clone())
+            Ok(res.clone_header())
         } else {
             Err(QueueError::QueueEmpty)
         }
@@ -182,7 +184,7 @@ impl MessageQueue for AsyncMessageQueue {
             let res = unsafe {
                 self.buffer[self.start as usize].assume_init_ref()
             };
-            Ok(res.header.clone())
+            Ok(res.clone_header())
         } else {
             Err(QueueError::QueueEmpty)
         }
@@ -197,8 +199,8 @@ impl MessageQueue for AsyncMessageQueue {
                 Err(QueueError::BufferTooSmall)
             } else {
                 let data = msg.body;
-                let len = data.len();
-                buffer[..len].copy_from_slice(&data);
+                let len = msg.header.len as usize;
+                buffer[..len].copy_from_slice(&data[..len]);
                 unsafe {
                     self.buffer[self.start as usize].assume_init_drop();
                 }
@@ -238,17 +240,124 @@ static mut QUEUE2_MESSAGES: [MaybeUninit<Message>; 10] = [const { MaybeUninit::u
 
 pub static mut SYNC_QUEUES1: [SyncMessageQueue; 1] = unsafe { [SyncMessageQueue::new(&mut *&raw mut QUEUE1_MESSAGES)] };
 pub static mut SYNC_QUEUES2: [SyncMessageQueue; 1] = unsafe { [SyncMessageQueue::new(&mut *&raw mut QUEUE2_MESSAGES)] };
-pub static mut SYNC_QUEUES3: [SyncMessageQueue; 0] = [];
-
-pub static mut ASYNC_QUEUES1: [AsyncMessageQueue; 0] = [];
-pub static mut ASYNC_QUEUES2: [AsyncMessageQueue; 0] = [];
-pub static mut ASYNC_QUEUES3: [AsyncMessageQueue; 0] = [];
 
 pub static SYNC_ENDPOINTS1: Endpoints<SyncMessageQueue> = Endpoints { endpoints: &[unsafe { (* &raw mut SYNC_QUEUES2).as_mut_ptr().add(0) }] };
-pub static ASYNC_ENDPOINTS1: Endpoints<AsyncMessageQueue> = Endpoints { endpoints: &[] };
 
 pub static SYNC_ENDPOINTS2: Endpoints<SyncMessageQueue> = Endpoints { endpoints: & [unsafe { (* &raw mut SYNC_QUEUES1).as_mut_ptr().add(0) }] };
-pub static ASYNC_ENDPOINTS2: Endpoints<AsyncMessageQueue> = Endpoints { endpoints: &[] };
 
-pub static SYNC_ENDPOINTS3: Endpoints<SyncMessageQueue> = Endpoints { endpoints: & [] };
-pub static ASYNC_ENDPOINTS3: Endpoints<AsyncMessageQueue> = Endpoints { endpoints: &[] };
+
+#[cfg(test)]
+mod test {
+    use crate::{print, println};
+
+    use super::*;
+
+    #[test_case]
+    fn test_sync() {
+        println!("Testing synchronous queues");
+        static mut MESSAGES: [MaybeUninit<Message>; 10] = [const { MaybeUninit::uninit() }; 10];
+
+        let mut queue = unsafe {
+            SyncMessageQueue::new(&mut * &raw mut MESSAGES)
+        };
+
+        print!("Checking capacity ");
+        assert_eq!(queue.capacity(), 10);
+        println!("[ok]");
+        print!("Checking len ");
+        assert_eq!(queue.len(), 0);
+        assert_eq!(queue.len(), queue.len as usize);
+        println!("[ok]");
+    
+        let mut proc = Proc::new();
+        proc.pid = 1;
+
+        print!("Testing send message ");
+        let small_msg = Message::direct(&raw mut proc, 15, 10, 4).unwrap();
+        queue.send(small_msg).unwrap();
+        assert_eq!(queue.len, 1);
+        assert_eq!(queue.end, 1);
+        assert_eq!(queue.start, 0);
+        println!("[ok]");
+
+        print!("Testing read header ");
+        let header = queue.read_header().unwrap();
+        unsafe {
+            assert_eq!(header.sender.proc, &raw mut proc);
+        }
+        assert_eq!(header.len, 4);
+        assert_eq!(header.tag, 15);
+        println!("[ok]");
+        
+        print!("Testing read body ");
+        let mut buffer = [0; 4];
+        let read = queue.read_data(&mut buffer).unwrap();
+        assert_eq!(read, 4);
+        assert_eq!(buffer[0], 0);
+        assert_eq!(buffer[1], 0);
+        assert_eq!(buffer[2], 0);
+        assert_eq!(buffer[3], 10);
+        println!("[ok]");
+
+        print!("Testing reply ");
+        let proc_ptr = queue.reply().unwrap();
+        assert_eq!(proc_ptr, &raw mut proc);
+        assert_eq!(queue.start, 1);
+        assert_eq!(queue.end, 1);
+        assert_eq!(queue.len, 0);
+        println!("[ok]");
+    }
+
+    #[test_case]
+    fn test_async() {
+        println!("Testing asynchronous queues");
+        static mut MESSAGES: [MaybeUninit<AsyncMessage>; 10] = [const { MaybeUninit::uninit() }; 10];
+
+        let mut queue = unsafe {
+            AsyncMessageQueue::new(&mut * &raw mut MESSAGES)
+        };
+
+        print!("Checking capacity ");
+        assert_eq!(queue.capacity(), 10);
+        println!("[ok]");
+        print!("Checking len ");
+        assert_eq!(queue.len(), 0);
+        assert_eq!(queue.len(), queue.len as usize);
+        println!("[ok]");
+    
+        let mut proc = Proc::new();
+        proc.pid = 1;
+
+        print!("Testing send message ");
+        let msg = AsyncMessage::new(proc.pid, 15, &[2, 4, 6, 8, 10]).unwrap();
+        queue.send(msg).unwrap();
+        assert_eq!(queue.len, 1);
+        assert_eq!(queue.end, 1);
+        assert_eq!(queue.start, 0);
+        println!("[ok]");
+
+        print!("Testing read header ");
+        let header = queue.read_header().unwrap();
+        unsafe {
+            assert_eq!(header.sender.pid, proc.pid);
+        }
+        assert_eq!(header.len, 5);
+        assert_eq!(header.tag, 15);
+        println!("[ok]");
+        
+        print!("Testing read body ");
+        let mut buffer = [0; 5];
+        let read = queue.read_data(&mut buffer).unwrap();
+        assert_eq!(read, 5);
+        assert_eq!(buffer[0], 2);
+        assert_eq!(buffer[1], 4);
+        assert_eq!(buffer[2], 6);
+        assert_eq!(buffer[3], 8);
+        assert_eq!(buffer[4], 10);
+        assert_eq!(queue.start, 1);
+        assert_eq!(queue.end, 1);
+        assert_eq!(queue.len, 0);
+        println!("[ok]");
+    }
+
+}
