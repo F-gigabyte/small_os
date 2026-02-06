@@ -597,6 +597,13 @@ mod test {
             assert_eq!((*scheduler.current).pid, 9);
         }
         println!("[ok]");
+        print!("Testing terminating current ");
+        scheduler.terminate_current();
+        scheduler.next_process();
+        unsafe {
+            assert_eq!((*scheduler.current).pid, 1);
+        }
+        println!("[ok]");
     }
 
 }
