@@ -479,9 +479,9 @@ impl Scheduler {
             // set proc to dead as may be referenced by other processes
             proc.set_state(ProcState::Dead);
             Ok(())
-        } else if state == ProcState::Running {
+        } else if matches!(state, ProcState::Running | ProcState::Init) {
             // free proc as not referenced anywhere else
-            proc.set_state(ProcState::Init);
+            proc.set_state(ProcState::Free);
             self.current = ptr::null_mut();
             Ok(())
         } else {
@@ -534,7 +534,69 @@ pub unsafe fn get_current_proc() -> *mut Proc {
     scheduler(&cs).get_current()
 }
 
+#[cfg(test)]
 mod test {
+    use crate::{print, println};
+
     use super::*;
+        
+    static mut PROCS: [UnsafeCell<Proc>; 10] = [const { UnsafeCell::new(Proc::new()) }; 10];
+
+    #[test_case]
+    fn test_priority() {
+        println!("Testing scheduler priority");
+        let mut scheduler = unsafe {
+            Scheduler::new(&mut * &raw mut PROCS)
+        };
+        let mut stack = [0; 8 * 10];
+        for i in 0..4 {
+            unsafe {
+                let pid = scheduler.create_proc(i as u32, 0, stack.as_mut_ptr().add(8 * i + 8) as u32, 1 as u8, None, None, None, None).unwrap();
+                scheduler.schedule_process(pid).unwrap();
+            }
+        }
+        for i in 4..9 {
+            unsafe {
+                let pid = scheduler.create_proc(i as u32, 0, stack.as_mut_ptr().add(8 * i + 8) as u32, i as u8, None, None, None, None).unwrap();
+                scheduler.schedule_process(pid).unwrap();
+            }
+        }
+        print!("Testing round robin ");
+        scheduler.next_process();
+        unsafe {
+            assert_eq!((*scheduler.current).pid, 0);
+        }
+        scheduler.yield_current();
+        scheduler.next_process();
+        unsafe {
+            assert_eq!((*scheduler.current).pid, 1);
+        }
+        scheduler.yield_current();
+        scheduler.next_process();
+        unsafe {
+            assert_eq!((*scheduler.current).pid, 2);
+        }
+        scheduler.yield_current();
+        scheduler.next_process();
+        unsafe {
+            assert_eq!((*scheduler.current).pid, 3);
+        }
+        scheduler.yield_current();
+        scheduler.next_process();
+        unsafe {
+            assert_eq!((*scheduler.current).pid, 0);
+        }
+        println!("[ok]");
+        print!("Testing preemptive high priority task ");
+        unsafe {
+            let pid = scheduler.create_proc(9, 0, stack.as_mut_ptr().add(80) as u32, 0, None, None, None, None).unwrap();
+            scheduler.schedule_process(pid).unwrap();
+        }
+        scheduler.next_process();
+        unsafe {
+            assert_eq!((*scheduler.current).pid, 9);
+        }
+        println!("[ok]");
+    }
 
 }
