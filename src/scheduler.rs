@@ -1,6 +1,6 @@
 use core::{cell::UnsafeCell, ptr, slice};
 
-use crate::{inter::CS, message_queue::{AsyncMessageQueue, Endpoints, MessageQueue, QueueError, SyncMessageQueue}, messages::{AsyncMessage, MESSAGE_DIRECT_LEN, Message}, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcState}};
+use crate::{inter::CS, message_queue::{AsyncMessageQueue, Endpoints, QueueError, SyncMessageQueue}, messages::Message, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcState}};
 
 pub const NUM_PROCESSES: usize = 3;
 
@@ -253,23 +253,13 @@ impl Scheduler {
         self.irq_events[irq] = ptr::null_mut();
     }
 
-    /// SAFETY
-    /// either `len` <= 4 or `data` contains a pointer to a `u8` buffer of length `len` 
-    pub unsafe fn send(&mut self, endpoint: u32, tag: u32, len: u32, data: u32) -> Result<(), QueueError> {
+    pub fn send(&mut self, endpoint: u32) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
         };
         if endpoint < current.num_sync_endpoints {
             let queue = unsafe {
                 &mut **current.sync_endpoints.add(endpoint as usize)
-            };
-            if (len as usize) < MESSAGE_DIRECT_LEN {
-                queue.send(Message::direct(&raw mut *current, tag, data, len).unwrap())?;
-            } else {
-                let data = unsafe {
-                    slice::from_raw_parts(ptr::with_exposed_provenance_mut(data as usize), len as usize)
-                };
-                queue.send(Message::indirect(&raw mut *current, tag, data))?;
             };
             // block current process
             current.set_state(ProcState::Blocked);
@@ -279,14 +269,21 @@ impl Scheduler {
                     &mut *queue.blocked
                 };
                 // set blocked processes message header
+                // pid
                 proc.set_r0(current.pid);
-                proc.set_r1(tag);
-                proc.set_r2(len);
+                // tag
+                proc.set_r1(current.get_r1());
+                // message length
+                proc.set_r2(current.get_r2());
                 // wake up blocked receiver
                 unsafe {
                     self.schedule_internal(queue.blocked);
                 }
                 queue.blocked = ptr::null_mut();
+            }
+            // send current to queue
+            unsafe {
+                queue.send(&raw mut *current);
             }
             Ok(())
         } else {
@@ -307,7 +304,7 @@ impl Scheduler {
             let data = unsafe {
                 slice::from_raw_parts(ptr::with_exposed_provenance_mut(data as usize), len as usize)
             };
-            if let Some(msg) = AsyncMessage::new(current.pid, tag, data) {
+            if let Some(msg) = Message::new(current.pid, tag, data) {
                 queue.send(msg)?;
                 if !queue.blocked.is_null() {
                     let proc = unsafe {
@@ -342,10 +339,7 @@ impl Scheduler {
             };
             match queue.read_header() {
                 Ok(header) => {
-                    let sender = unsafe {
-                        & *header.sender.proc
-                    };
-                    current.set_r0(sender.pid);
+                    current.set_r0(header.pid);
                     current.set_r1(header.tag);
                     current.set_r2(header.len);
                     Ok(())
@@ -377,10 +371,7 @@ impl Scheduler {
             };
             match queue.read_header() {
                 Ok(header) => {
-                    let pid = unsafe {
-                        header.sender.pid
-                    };
-                    current.set_r0(pid);
+                    current.set_r0(header.pid);
                     current.set_r1(header.tag);
                     current.set_r2(header.len);
                     Ok(())
@@ -451,11 +442,7 @@ impl Scheduler {
                 &mut *current.sync_queues.add(queue as usize)
             };
             // wake up sender and send reply
-            let sender = queue.reply()?;
-            let sender = unsafe {
-                &mut *sender
-            };
-            sender.set_r0(msg);
+            let sender = queue.reply(msg)?;
             unsafe {
                 self.schedule_internal(&raw mut *sender);
             }

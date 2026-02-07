@@ -135,6 +135,41 @@ impl Proc {
         }
     }
     
+    pub fn get_r0(&mut self) -> u32 {
+        let stack: *const u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
+        unsafe {
+            *stack
+        }
+    }
+    
+    pub fn get_r1(&mut self) -> u32 {
+        let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
+        unsafe {
+            *stack.add(1)
+        }
+    }
+    
+    pub fn get_r2(&mut self) -> u32 {
+        let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
+        unsafe {
+            *stack.add(2)
+        }
+    }
+    
+    pub fn get_r3(&mut self) -> u32 {
+        let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
+        unsafe {
+            *stack.add(3)
+        }
+    }
+    
+    pub fn get_r12(&mut self) -> u32 {
+        let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
+        unsafe {
+            *stack.add(4)
+        }
+    }
+    
     pub fn set_lr(&mut self, lr: u32) {
         let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
         unsafe {

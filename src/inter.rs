@@ -35,9 +35,6 @@ pub enum SysCall {
     // 3
     Send {
         endpoint: u32,
-        tag: u32,
-        len: u32,
-        data: u32
     },
     // 4
     SendAsync {
@@ -97,9 +94,6 @@ impl TryFrom<&StackTrace> for SysCall {
             }),
             3 => Ok(SysCall::Send { 
                 endpoint: stack.r0,
-                tag: stack.r1,
-                len: stack.r2,
-                data: stack.r3
             }),
             4 => Ok(SysCall::SendAsync { 
                 endpoint: stack.r0,
@@ -258,13 +252,10 @@ fn do_sys_call(sys_call: SysCall, stack: &mut StackTrace, cs: &CS) -> Result<(),
         // send message
         SysCall::Send { 
             endpoint,  
-            tag,
-            len,
-            data
         } => {
             let mut scheduler = scheduler(cs);
             unsafe {
-                scheduler.send(endpoint, tag, len, data).map_err(|err| u32::from(err))
+                scheduler.send(endpoint).map_err(|err| u32::from(err))
             }
         },
         SysCall::SendAsync { 

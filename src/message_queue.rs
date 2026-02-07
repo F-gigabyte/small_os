@@ -1,20 +1,13 @@
-use core::{mem::{self, MaybeUninit}, ptr, slice};
+use core::{mem::MaybeUninit, ptr, slice};
 
-use crate::{messages::{AsyncMessage, MESSAGE_DIRECT_LEN, Message, MessageHeader}, proc::Proc};
+use crate::{messages::{Message, MessageHeader}, println, proc::{Proc, ProcState}};
 
-pub trait MessageQueue {
-    type MessageType;
-    fn send(&mut self, msg: Self::MessageType) -> Result<(), QueueError>;
-    fn read_header(&self) -> Result<MessageHeader, QueueError>;
-    fn read_data(&mut self, buffer: &mut [u8]) -> Result<usize, QueueError>;
-}
+pub trait MessageQueue {}
 
 #[repr(C)]
 pub struct SyncMessageQueue {
-    buffer: &'static mut [MaybeUninit<Message>],
-    start: u32,
-    end: u32,
-    len: u32,
+    pub front: *mut Proc,
+    pub back: *mut Proc,
     pub blocked: *mut Proc,
 }
 
@@ -25,7 +18,8 @@ pub enum QueueError {
     BufferTooSmall,
     QueueFull,
     InvalidQueue(u32),
-    BufferTooLarge
+    BufferTooLarge,
+    Died
 }
 
 impl From<QueueError> for u32 {
@@ -35,12 +29,141 @@ impl From<QueueError> for u32 {
             QueueError::QueueEmpty => 1,
             QueueError::QueueFull => 2,
             QueueError::BufferTooSmall => 3,
-            QueueError::BufferTooLarge => 4
+            QueueError::BufferTooLarge => 4,
+            QueueError::Died => 5
         }
     }
 }
 
 impl SyncMessageQueue {
+    pub const unsafe fn new() -> Self {
+        Self {
+            front: ptr::null_mut(),
+            back: ptr::null_mut(),
+            blocked: ptr::null_mut()
+        }
+    }
+    
+    /// SAFETY
+    /// `proc` must be a valid process and blocked
+    pub unsafe fn send(&mut self, proc: *mut Proc) {
+        let proc = unsafe {
+            &mut *proc
+        };
+        proc.next = ptr::null_mut();
+        if self.back.is_null() {
+            self.front = proc;
+            self.back = proc;
+        } else {
+            let back = unsafe {
+                &mut *self.back
+            };
+            back.next = proc;
+        }
+    }
+
+    pub fn read_header(&mut self) -> Result<MessageHeader, QueueError> {
+        while !self.front.is_null() {
+            let proc = unsafe {
+                &mut *self.front
+            };
+            // skip and free dead processes
+            if proc.get_state() == ProcState::Dead {
+                proc.set_state(ProcState::Free);
+                self.front = proc.next;
+            } else {
+                break;
+            }
+        }
+        if self.front.is_null() {
+            return Err(QueueError::QueueEmpty);
+        }
+        let front = unsafe {
+            &mut *self.front
+        };
+        Ok(MessageHeader { 
+            pid: front.pid, 
+            tag: front.get_r1(), // r1 contains message tag 
+            len: front.get_r2() // r2 contains message length
+        })
+    }
+
+    pub fn read_data(&mut self, buffer: &mut [u8]) -> Result<usize, QueueError> {
+        if self.front.is_null() {
+            return Err(QueueError::QueueEmpty);
+        }
+        let front = unsafe {
+            &mut *self.front
+        };
+        if front.get_state() == ProcState::Dead {
+            // if front died, remove from queue and free it
+            front.set_state(ProcState::Free);
+            self.front = front.next;
+            if self.front.is_null() {
+                self.back = ptr::null_mut();
+            }
+            return Err(QueueError::Died);
+        }
+        let len = front.get_r2() as usize;
+        let data = front.get_r3();
+        if len > buffer.len() {
+            return Err(QueueError::BufferTooSmall);
+        }
+        if len > 4 {
+            // indirect message
+            let data = unsafe {
+                slice::from_raw_parts(ptr::with_exposed_provenance(data as usize), len)
+            };
+            buffer[..len].copy_from_slice(data);
+        } else {
+            // direct message
+            let data = data.to_be_bytes();
+            buffer[..len].copy_from_slice(&data[..len]);
+        }
+        Ok(len)
+    }
+
+    pub fn reply(&mut self, msg: u32) -> Result<*mut Proc, QueueError> {
+        if self.front.is_null() {
+            return Err(QueueError::QueueEmpty);
+        }
+        let front = unsafe {
+            &mut *self.front
+        };
+        if front.get_state() == ProcState::Dead {
+            // if front died, remove from queue and free it
+            front.set_state(ProcState::Free);
+            self.front = front.next;
+            if self.front.is_null() {
+                self.back = ptr::null_mut();
+            }
+            return Err(QueueError::Died);
+        }
+        front.set_r0(msg);
+        self.front = front.next;
+        if self.front.is_null() {
+            self.back = ptr::null_mut();
+        }
+        Ok(front)
+    }
+}
+
+impl MessageQueue for SyncMessageQueue {}
+
+unsafe impl Send for SyncMessageQueue {}
+unsafe impl Sync for SyncMessageQueue {}
+
+
+#[repr(C)]
+pub struct AsyncMessageQueue {
+    buffer: &'static mut [MaybeUninit<Message>],
+    start: u32,
+    end: u32,
+    len: u32,
+    pub blocked: *mut Proc,
+}
+
+impl AsyncMessageQueue {
     pub const unsafe fn new(buffer: &'static mut [MaybeUninit<Message>]) -> Self {
         Self {
             buffer,
@@ -51,108 +174,6 @@ impl SyncMessageQueue {
         }
     }
     
-    #[inline(always)]
-    pub fn len(&self) -> usize {
-        self.len as usize
-    }
-
-    #[inline(always)]
-    pub const fn capacity(&self) -> usize {
-        self.buffer.len()
-    }
-
-    pub fn reply(&mut self) -> Result<*mut Proc, QueueError> {
-        if self.len > 0 {
-            let msg = unsafe {
-                mem::replace(&mut self.buffer[self.start as usize], MaybeUninit::uninit()).assume_init()
-            };
-            self.len -= 1;
-            self.start = (self.start + 1) % (self.buffer.len() as u32);
-            unsafe {
-                Ok(msg.header.sender.proc)
-            }
-        } else {
-            Err(QueueError::QueueEmpty)
-        }
-    }
-}
-
-impl MessageQueue for SyncMessageQueue {
-    type MessageType = Message;
-
-    fn send(&mut self, msg: Self::MessageType) -> Result<(), QueueError> {
-        if (self.len as usize) < self.buffer.len() {
-            self.buffer[self.end as usize].write(msg);
-            self.len += 1;
-            self.end = (self.end + 1) % self.buffer.len() as u32;
-            Ok(())
-        } else {
-            Err(QueueError::QueueFull)
-        }
-    }
-
-    fn read_header(&self) -> Result<MessageHeader, QueueError> {
-        if self.len > 0 {
-            let res = unsafe {
-                self.buffer[self.start as usize].assume_init_ref()
-            };
-            Ok(res.clone_header())
-        } else {
-            Err(QueueError::QueueEmpty)
-        }
-    }
-
-    fn read_data(&mut self, buffer: &mut [u8]) -> Result<usize, QueueError> {
-        if self.len > 0 {
-            let msg = unsafe {
-                self.buffer[self.start as usize].assume_init_ref()
-            };
-            if buffer.len() < msg.header.len as usize {
-                Err(QueueError::BufferTooSmall)
-            } else {
-                let data = if msg.header.len as usize <= MESSAGE_DIRECT_LEN {
-                    unsafe {
-                        & msg.body.direct[..msg.header.len as usize]
-                    }
-                } else {
-                    unsafe {
-                        slice::from_raw_parts(msg.body.indirect, msg.header.len as usize)
-                    }
-                };
-                let len = data.len();
-                buffer[..len].copy_from_slice(data);
-                Ok(len)
-            }
-        } else {
-            Err(QueueError::QueueEmpty)
-        }
-    }
-}
-
-unsafe impl Send for SyncMessageQueue {}
-unsafe impl Sync for SyncMessageQueue {}
-
-
-#[repr(C)]
-pub struct AsyncMessageQueue {
-    buffer: &'static mut [MaybeUninit<AsyncMessage>],
-    start: u32,
-    end: u32,
-    len: u32,
-    pub blocked: *mut Proc,
-}
-
-impl AsyncMessageQueue {
-    pub const unsafe fn new(buffer: &'static mut [MaybeUninit<AsyncMessage>]) -> Self {
-        Self {
-            buffer,
-            start: 0,
-            end: 0,
-            len: 0,
-            blocked: ptr::null_mut(),
-        }
-    }
-    
 
     #[inline(always)]
     pub fn len(&self) -> usize {
@@ -163,12 +184,8 @@ impl AsyncMessageQueue {
     pub const fn capacity(&self) -> usize {
         self.buffer.len()
     }
-}
-
-impl MessageQueue for AsyncMessageQueue {
-    type MessageType = AsyncMessage;
     
-    fn send(&mut self, msg: Self::MessageType) -> Result<(), QueueError> {
+    pub fn send(&mut self, msg: Message) -> Result<(), QueueError> {
         if (self.len as usize) < self.buffer.len() {
             self.buffer[self.end as usize].write(msg);
             self.len += 1;
@@ -179,18 +196,18 @@ impl MessageQueue for AsyncMessageQueue {
         }
     }
 
-    fn read_header(&self) -> Result<MessageHeader, QueueError> {
+    pub fn read_header(&self) -> Result<MessageHeader, QueueError> {
         if self.len > 0 {
             let res = unsafe {
                 self.buffer[self.start as usize].assume_init_ref()
             };
-            Ok(res.clone_header())
+            Ok(res.header.clone())
         } else {
             Err(QueueError::QueueEmpty)
         }
     }
 
-    fn read_data(&mut self, buffer: &mut [u8]) -> Result<usize, QueueError> {
+    pub fn read_data(&mut self, buffer: &mut [u8]) -> Result<usize, QueueError> {
         if self.len > 0 {
             let msg = unsafe {
                 self.buffer[self.start as usize].assume_init_ref()
@@ -214,6 +231,8 @@ impl MessageQueue for AsyncMessageQueue {
     }
 }
 
+impl MessageQueue for AsyncMessageQueue {}
+
 unsafe impl Send for AsyncMessageQueue {}
 unsafe impl Sync for AsyncMessageQueue {}
 
@@ -235,11 +254,8 @@ impl<QUEUE: MessageQueue + 'static> Endpoints<QUEUE> {
 unsafe impl<QUEUE: MessageQueue + 'static> Send for Endpoints<QUEUE> {}
 unsafe impl<QUEUE: MessageQueue + 'static> Sync for Endpoints<QUEUE> {}
 
-static mut QUEUE1_MESSAGES: [MaybeUninit<Message>; 10] = [const { MaybeUninit::uninit() }; 10];
-static mut QUEUE2_MESSAGES: [MaybeUninit<Message>; 10] = [const { MaybeUninit::uninit() }; 10];
-
-pub static mut SYNC_QUEUES1: [SyncMessageQueue; 1] = unsafe { [SyncMessageQueue::new(&mut *&raw mut QUEUE1_MESSAGES)] };
-pub static mut SYNC_QUEUES2: [SyncMessageQueue; 1] = unsafe { [SyncMessageQueue::new(&mut *&raw mut QUEUE2_MESSAGES)] };
+pub static mut SYNC_QUEUES1: [SyncMessageQueue; 1] = unsafe { [SyncMessageQueue::new()] };
+pub static mut SYNC_QUEUES2: [SyncMessageQueue; 1] = unsafe { [SyncMessageQueue::new()] };
 
 pub static SYNC_ENDPOINTS1: Endpoints<SyncMessageQueue> = Endpoints { endpoints: &[unsafe { (* &raw mut SYNC_QUEUES2).as_mut_ptr().add(0) }] };
 
@@ -257,36 +273,40 @@ mod test {
     #[test_case]
     fn test_sync() {
         println!("Testing synchronous queues");
-        static mut MESSAGES: [MaybeUninit<Message>; 10] = [const { MaybeUninit::uninit() }; 10];
 
         let mut queue = unsafe {
-            SyncMessageQueue::new(&mut * &raw mut MESSAGES)
+            SyncMessageQueue::new()
         };
+        let stack: [u32; 8] = [0; _];
 
-        print!("Checking capacity ");
-        assert_eq!(queue.capacity(), 10);
-        println!("[ok]");
-        print!("Checking len ");
-        assert_eq!(queue.len(), 0);
-        assert_eq!(queue.len(), queue.len as usize);
-        println!("[ok]");
-    
         let mut proc = Proc::new();
-        proc.pid = 1;
+        unsafe {
+            proc.init(
+                1, 
+                0, 
+                stack.as_ptr().add(stack.len()) as u32, 
+                0, 
+                None, 
+                None, 
+                None, 
+                None
+            );
+        }
 
         print!("Testing send message ");
-        let small_msg = Message::direct(&raw mut proc, 15, 10, 4).unwrap();
-        queue.send(small_msg).unwrap();
-        assert_eq!(queue.len, 1);
-        assert_eq!(queue.end, 1);
-        assert_eq!(queue.start, 0);
+        proc.set_r1(15);
+        proc.set_r2(4);
+        proc.set_r3(10);
+        unsafe {
+            queue.send(&raw mut proc);
+        }
+        assert_eq!(queue.front, &raw mut proc);
+        assert_eq!(queue.back, &raw mut proc);
         println!("[ok]");
 
         print!("Testing read header ");
         let header = queue.read_header().unwrap();
-        unsafe {
-            assert_eq!(header.sender.proc, &raw mut proc);
-        }
+        assert_eq!(header.pid, proc.pid);
         assert_eq!(header.len, 4);
         assert_eq!(header.tag, 15);
         println!("[ok]");
@@ -302,11 +322,11 @@ mod test {
         println!("[ok]");
 
         print!("Testing reply ");
-        let proc_ptr = queue.reply().unwrap();
+        let proc_ptr = queue.reply(20).unwrap();
         assert_eq!(proc_ptr, &raw mut proc);
-        assert_eq!(queue.start, 1);
-        assert_eq!(queue.end, 1);
-        assert_eq!(queue.len, 0);
+        assert_eq!(queue.front, ptr::null_mut());
+        assert_eq!(queue.back, ptr::null_mut());
+        assert_eq!(proc.get_r0(), 20);
         println!("[ok]");
 
         print!("Testing read empty queue ");
@@ -323,7 +343,7 @@ mod test {
     #[test_case]
     fn test_async() {
         println!("Testing asynchronous queues");
-        static mut MESSAGES: [MaybeUninit<AsyncMessage>; 10] = [const { MaybeUninit::uninit() }; 10];
+        static mut MESSAGES: [MaybeUninit<Message>; 10] = [const { MaybeUninit::uninit() }; 10];
 
         let mut queue = unsafe {
             AsyncMessageQueue::new(&mut * &raw mut MESSAGES)
@@ -341,7 +361,7 @@ mod test {
         proc.pid = 1;
 
         print!("Testing send message ");
-        let msg = AsyncMessage::new(proc.pid, 15, &[2, 4, 6, 8, 10]).unwrap();
+        let msg = Message::new(proc.pid, 15, &[2, 4, 6, 8, 10]).unwrap();
         queue.send(msg).unwrap();
         assert_eq!(queue.len, 1);
         assert_eq!(queue.end, 1);
@@ -350,9 +370,7 @@ mod test {
 
         print!("Testing read header ");
         let header = queue.read_header().unwrap();
-        unsafe {
-            assert_eq!(header.sender.pid, proc.pid);
-        }
+        assert_eq!(header.pid, proc.pid);
         assert_eq!(header.len, 5);
         assert_eq!(header.tag, 15);
         println!("[ok]");
@@ -381,5 +399,4 @@ mod test {
         assert_matches!(queue.read_data(&mut buffer).err().unwrap(), QueueError::QueueEmpty);
         println!("[ok]");
     }
-
 }
