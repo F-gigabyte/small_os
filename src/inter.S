@@ -47,23 +47,6 @@ _start:
     adds r1, #4
     b 2b
 1:
-    // copy vectors into SRAM4
-    ldr r0, =__vec_start
-    ldr r2, =__vec_end
-    ldr r1, =__sram4_start
-    mov r3, r1
-2:
-    cmp r0, r2
-    bge 1f
-    ldr r3, [r0]
-    adds r0, #4
-    str r3, [r1]
-    adds r1, #4
-    b 2b
-1:
-    // copy vector base into VTOR
-    ldr r0, =0xe000ed08
-    str r1, [r0]
     // jump to main
     bl main
 
