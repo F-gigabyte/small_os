@@ -37,7 +37,7 @@ _start:
     // copy data into memory
     ldr r0, =__data_start // Data physical address
     ldr r2, =__data_end // Data physical end address
-    ldr r1, =__ram_start // RAM start
+    ldr r1, =__data_load // Data load address
 2:
     cmp r0, r2
     bge 1f

@@ -10,7 +10,7 @@
 #![no_main]
 #![reexport_test_harness_main = "test_main"]
 
-use core::{intrinsics::abort, panic::PanicInfo};
+use core::{intrinsics::abort, panic::PanicInfo, ptr};
 
 use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, message_queue::{SYNC_ENDPOINTS1, SYNC_ENDPOINTS2, SYNC_QUEUES1, SYNC_QUEUES2}, mutex::force_spinlock_unlock, nvic::{NVIC, irqs}, pll::PLL, reset::RESET, rosc::ROSC, scheduler::scheduler, system::SYSTEM, test_proc::{test_func, test_func2, test_func3}, timer::{TIMER, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
 
@@ -36,6 +36,10 @@ pub mod sys_tick;
 pub mod system;
 pub mod messages;
 pub mod message_queue;
+
+unsafe extern "C" {
+    static __stack: u8;
+}
 
 /// panic handler
 /// this function is called when a panic happens
