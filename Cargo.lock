@@ -34,6 +34,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8591b0bcc8a98a64310a2fae1bb3e9b8564dd10e381e6e28010fde8e8e8568db"
 
 [[package]]
+name = "kernel"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "rp2040-boot2",
+ "safe-mmio",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -74,15 +83,6 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
-
-[[package]]
-name = "small_os"
-version = "0.1.0"
-dependencies = [
- "cc",
- "rp2040-boot2",
- "safe-mmio",
-]
 
 [[package]]
 name = "syn"

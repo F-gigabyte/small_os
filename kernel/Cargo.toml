@@ -1,5 +1,5 @@
 [package]
-name = "small_os"
+name = "kernel"
 # From https://os.phil-opp.com/testing/ (accessed 6/02/2026)
 test = true # Enable testing
 version = "0.1.0"
