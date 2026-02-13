@@ -1,16 +1,3 @@
-[package]
-name = "small_os"
-# From https://os.phil-opp.com/testing/ (accessed 6/02/2026)
-test = true # Enable testing
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-rp2040-boot2 = "0.3.0"
-safe-mmio = "0.2.7"
-
-[build-dependencies]
-cc = "1.2.53"
-
-[profile.release]
-debug = "full"
+[workspace]
+resolver = "3"
+members = ["kernel", "test_driver"]

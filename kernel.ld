@@ -35,6 +35,8 @@ SECTIONS {
         *(.bss.*);
     } > RAM AT > FLASH
 
+    __proc_table = ALIGN(LOADADDR(.data) + SIZEOF(.data), 4);
+
     __data_start = LOADADDR(.data);
     __data_end = LOADADDR(.data) + SIZEOF(.data);
 

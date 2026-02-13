@@ -27,11 +27,11 @@ fn read_dir(path: &Path, builder: &mut cc::Build) {
 
 fn main() {
     // rerun if linker script changes
-    println!("cargo::rerun-if-changed=link.ld");
+    println!("cargo::rerun-if-changed=kernel.ld");
     // rerun if this build script changes
-    println!("cargo::rerun-if-changed=build.rs");
-    // use link.ld linker script
-    println!("cargo::rustc-link-arg=-Tlink.ld");
+    println!("cargo::rerun-if-changed=kernel/build.rs");
+    // use kernel.ld linker script
+    println!("cargo::rustc-link-arg=-Tkernel.ld");
     let mut builder = cc::Build::new();
     let start_dir = Path::new("src");
     // set default compiler to clang as its by default a cross compiler while gcc would need to be
