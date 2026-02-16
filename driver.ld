@@ -19,4 +19,9 @@ SECTIONS {
         *(.rodata);
         *(.rodata.*);
     }
+    
+    /DISCARD/ : {
+        *(.ARM.exidx);
+        *(.ARM.exidx.*);
+    }
 }

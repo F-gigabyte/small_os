@@ -1,0 +1,9 @@
+[kernel]
+priority = 0
+debug_src = "target/thumbv6m-none-eabi/debug/kernel"
+release_src = "target/thumbv6m-none-eabi/release/kernel"
+
+[test_driver]
+priority = 0
+debug_src = "target/thumbv6m-none-eabi/debug/test_driver"
+release_src = "target/thumbv6m-none-eabi/release/test_driver"

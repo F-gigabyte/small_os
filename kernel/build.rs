@@ -32,6 +32,7 @@ fn main() {
     println!("cargo::rerun-if-changed=kernel/build.rs");
     // use kernel.ld linker script
     println!("cargo::rustc-link-arg=-Tkernel.ld");
+    println!("cargo::rustc-link-arg=-r");
     let mut builder = cc::Build::new();
     let start_dir = Path::new("src");
     // set default compiler to clang as its by default a cross compiler while gcc would need to be

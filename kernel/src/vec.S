@@ -1,7 +1,7 @@
 .section .text.vectors
 
 _vec_table:
-    .word __stack // main sp (0)
+    .word __kernel_stack // main sp (0)
     .word _start // on reset jump to start (reset) (1)
     .word _nmi // nmi interrupt (2)
     .word _hard_fault // Hard fault (3)

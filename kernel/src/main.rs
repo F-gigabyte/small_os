@@ -10,9 +10,9 @@
 #![no_main]
 #![reexport_test_harness_main = "test_main"]
 
-use core::{intrinsics::abort, panic::PanicInfo};
+use core::{intrinsics::abort, panic::PanicInfo, ptr};
 
-use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, message_queue::{SYNC_ENDPOINTS1, SYNC_ENDPOINTS2, SYNC_QUEUES1, SYNC_QUEUES2}, mutex::force_spinlock_unlock, nvic::{NVIC, irqs}, pll::PLL, reset::RESET, rosc::ROSC, scheduler::scheduler, system::SYSTEM, test_proc::{test_func, test_func2, test_func3}, timer::{TIMER, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
+use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, message_queue::{SYNC_ENDPOINTS1, SYNC_ENDPOINTS2, SYNC_QUEUES1, SYNC_QUEUES2}, mutex::force_spinlock_unlock, nvic::{NVIC, irqs}, pll::PLL, program::{PROGRAM_TABLE, ProgramTable}, reset::RESET, rosc::ROSC, scheduler::scheduler, system::SYSTEM, test_proc::{test_func, test_func2, test_func3}, timer::{TIMER, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
 
 pub mod uart;
 pub mod reset;
@@ -36,9 +36,11 @@ pub mod sys_tick;
 pub mod system;
 pub mod messages;
 pub mod message_queue;
+pub mod program;
 
 unsafe extern "C" {
     static __stack: u8;
+    static __program_table: u8;
 }
 
 /// panic handler
@@ -125,18 +127,40 @@ pub extern "C" fn main() -> ! {
         nvic.enable_irq(irqs::TIMER0);
         {
             let mut scheduler = scheduler(&cs);
-            let pid = unsafe {
-                scheduler.create_proc(0, test_func as *const () as u32, 0x20005000, 1, Some((&raw mut SYNC_QUEUES1).as_mut().unwrap()), Some(&SYNC_ENDPOINTS1), None, None).unwrap()
-            };
-            scheduler.schedule_process(pid).unwrap();
-            let pid = unsafe {
-                scheduler.create_proc(1, test_func2 as *const () as u32, 0x20004000, 0, Some((&raw mut SYNC_QUEUES2).as_mut().unwrap()), Some(&SYNC_ENDPOINTS2), None, None).unwrap()
-            };
-            scheduler.schedule_process(pid).unwrap();
-            let pid = unsafe {
-                scheduler.create_proc(2, test_func3 as *const () as u32, 0x20003000, 0, None, None, None, None).unwrap()
-            };
-            scheduler.schedule_process(pid).unwrap();
+            let mut program_table = PROGRAM_TABLE.lock();
+            if program_table.is_none() {
+                unsafe {
+                    *program_table = Some(ProgramTable::new((&__program_table) as *const _ as usize));
+                }
+            }
+            let program_table = program_table.as_ref().unwrap();
+            let mut current_pid = 0;
+            for program in program_table.table() {
+                for region in &program.regions {
+                    let phys_addr = region.phys_addr & !0xff;
+                    let virt_addr = region.virt_addr & !0xff;
+                    println!("phys address: 0x{:x}", phys_addr);
+                    println!("virt address: 0x{:x}", virt_addr);
+                    if region.len > 0 && phys_addr != virt_addr {
+                        let mut phys_ptr: *const u32 = ptr::with_exposed_provenance(phys_addr as usize);
+                        let mut virt_ptr: *mut u32 = ptr::with_exposed_provenance_mut(virt_addr as usize);
+                        for _ in 0..region.len / 4 {
+                            unsafe {
+                                virt_ptr.write_volatile(phys_ptr.read_volatile());
+                                phys_ptr = phys_ptr.add(1);
+                                virt_ptr = virt_ptr.add(1);
+                            }
+                        }
+                    }
+                }
+                println!("Entry: 0x{:x}", program.entry);
+                println!("Stack: 0x{:x}", program.sp);
+                let pid = unsafe {
+                    scheduler.create_proc(current_pid, program.entry, program.sp, program.priority as u8, None, None, None, None).unwrap()
+                };
+                scheduler.schedule_process(pid).unwrap();
+                current_pid += 1;
+            }
         }
         let mut sys = SYSTEM.lock(&cs);
         #[cfg(not(test))]
