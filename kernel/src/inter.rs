@@ -1,6 +1,6 @@
 use core::{arch::asm, marker::PhantomData, ptr};
 
-use crate::{nvic::NVIC, println, proc::Proc, scheduler::{QUANTUM_MICROS, get_current_proc, scheduler}, sys_tick::SYS_TICK, system::{SYSTEM, SysIRQ}, timer::{TIMER, TimerIRQ}};
+use crate::{nvic::NVIC, println, proc::Proc, program::AccessAttr, scheduler::{QUANTUM_MICROS, get_current_proc, scheduler}, sys_tick::SYS_TICK, system::{SYSTEM, SysIRQ}, timer::{TIMER, TimerIRQ}};
 
 // https://aticleworld.com/arm-function-call-stack-frame/ accessed 4/02/2026 mentions r0 to r3, r12
 // and lr (r14) are caller saved so use r0 to r3 as arguments and r12 as sys call number so
@@ -35,6 +35,9 @@ pub enum SysCall {
     // 3
     Send {
         endpoint: u32,
+        tag: u32,
+        len: u32,
+        data: u32
     },
     // 4
     SendAsync {
@@ -94,6 +97,9 @@ impl TryFrom<&StackTrace> for SysCall {
             }),
             3 => Ok(SysCall::Send { 
                 endpoint: stack.r0,
+                tag: stack.r1,
+                len: stack.r2,
+                data: stack.r3
             }),
             4 => Ok(SysCall::SendAsync { 
                 endpoint: stack.r0,
@@ -215,6 +221,10 @@ fn do_sys_call(sys_call: SysCall, stack: &mut StackTrace, cs: &CS) -> Result<(),
             data, 
             len 
         } => {
+            let current = unsafe {
+                & *scheduler(cs).get_current()
+            };
+            current.check_access(data as u32, len, AccessAttr::new(true, false, false)).map_err(|_| 1u32)?;
             let text: &[u8] = unsafe {
                 & *ptr::slice_from_raw_parts(data, len as usize)
             };
@@ -228,7 +238,7 @@ fn do_sys_call(sys_call: SysCall, stack: &mut StackTrace, cs: &CS) -> Result<(),
         },
         // exit
         SysCall::Exit { 
-            code 
+            code: _ 
         } => {
             let mut scheduler = scheduler(cs);
             scheduler.terminate_current();
@@ -252,11 +262,12 @@ fn do_sys_call(sys_call: SysCall, stack: &mut StackTrace, cs: &CS) -> Result<(),
         // send message
         SysCall::Send { 
             endpoint,  
+            tag: _,
+            len,
+            data
         } => {
             let mut scheduler = scheduler(cs);
-            unsafe {
-                scheduler.send(endpoint).map_err(|err| u32::from(err))
-            }
+            scheduler.send(endpoint, len, data).map_err(|err| u32::from(err))
         },
         SysCall::SendAsync { 
             endpoint, 

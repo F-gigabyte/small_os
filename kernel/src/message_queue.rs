@@ -1,6 +1,6 @@
 use core::{mem::MaybeUninit, ptr, slice};
 
-use crate::{messages::{Message, MessageHeader}, println, proc::{Proc, ProcState}};
+use crate::{messages::{Message, MessageHeader}, println, proc::{Proc, ProcState}, program::AccessAttr};
 
 pub trait MessageQueue {}
 
@@ -19,7 +19,8 @@ pub enum QueueError {
     QueueFull,
     InvalidQueue(u32),
     BufferTooLarge,
-    Died
+    Died,
+    InvalidMemoryAccess
 }
 
 impl From<QueueError> for u32 {
@@ -30,7 +31,8 @@ impl From<QueueError> for u32 {
             QueueError::QueueFull => 2,
             QueueError::BufferTooSmall => 3,
             QueueError::BufferTooLarge => 4,
-            QueueError::Died => 5
+            QueueError::Died => 5,
+            QueueError::InvalidMemoryAccess => 6,
         }
     }
 }
@@ -110,6 +112,8 @@ impl SyncMessageQueue {
             return Err(QueueError::BufferTooSmall);
         }
         if len > 4 {
+            // check access is valid
+            front.check_access(data, len as u32, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
             // indirect message
             let data = unsafe {
                 slice::from_raw_parts(ptr::with_exposed_provenance(data as usize), len)

@@ -1,10 +1,12 @@
 .globl schedule
 .type schedule, "function"
+.globl switch_regions
 
 // starts running next process
 // r0 -> pointer to current Proc struct
 // This must be called within handler mode
 schedule:
+    bl switch_regions
     // set r1 to process stack pointer
     ldr r1, [r0, #0x24]
     // r4

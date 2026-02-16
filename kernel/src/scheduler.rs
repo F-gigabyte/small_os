@@ -1,6 +1,6 @@
 use core::{cell::UnsafeCell, ptr, slice};
 
-use crate::{inter::CS, message_queue::{AsyncMessageQueue, Endpoints, QueueError, SyncMessageQueue}, messages::Message, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcState}};
+use crate::{inter::CS, message_queue::{AsyncMessageQueue, Endpoints, QueueError, SyncMessageQueue}, messages::Message, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcState}, program::{AccessAttr, Program, Region}};
 
 pub const NUM_PROCESSES: usize = 3;
 
@@ -52,6 +52,7 @@ impl Scheduler {
         entry: u32, 
         sp: u32, 
         priority: u8, 
+        program: &'static mut Program,
         sync_queues: Option<&'static mut [SyncMessageQueue]>, 
         sync_endpoints: Option<&'static Endpoints<SyncMessageQueue>>,
         async_queues: Option<&'static mut [AsyncMessageQueue]>, 
@@ -63,7 +64,7 @@ impl Scheduler {
         let proc = self.processes[pid as usize].get_mut();
         if proc.get_state() == ProcState::Free {
             unsafe {
-                proc.init(pid, entry, sp, priority, sync_queues, sync_endpoints, async_queues, async_endpoints);
+                proc.init(pid, entry, sp, priority, regions, sync_queues, sync_endpoints, async_queues, async_endpoints);
             }
             Ok(pid)
         } else {
@@ -253,11 +254,13 @@ impl Scheduler {
         self.irq_events[irq] = ptr::null_mut();
     }
 
-    pub fn send(&mut self, endpoint: u32) -> Result<(), QueueError> {
+    pub fn send(&mut self, endpoint: u32, len: u32, data: u32) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
         };
         if endpoint < current.num_sync_endpoints {
+            // check access permissions
+            current.check_access(data, len, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
             let queue = unsafe {
                 &mut **current.sync_endpoints.add(endpoint as usize)
             };
@@ -298,6 +301,7 @@ impl Scheduler {
             &mut *self.current
         };
         if endpoint < current.num_async_endpoints {
+            current.check_access(data, len, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
             let queue = unsafe {
                 &mut **current.async_endpoints.add(endpoint as usize)
             };
@@ -403,6 +407,8 @@ impl Scheduler {
             let queue = unsafe {
                 &mut *current.sync_queues.add(queue as usize)
             };
+            // check access is valid
+            current.check_access(buffer as u32, len, AccessAttr::new(false, true, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
             let buffer = unsafe {
                 slice::from_raw_parts_mut(buffer, len as usize)
             };
@@ -423,6 +429,8 @@ impl Scheduler {
             let queue = unsafe {
                 &mut *current.async_queues.add(queue as usize)
             };
+            // check access is valid
+            current.check_access(buffer as u32, len, AccessAttr::new(false, true, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
             let buffer = unsafe {
                 slice::from_raw_parts_mut(buffer, len as usize)
             };
