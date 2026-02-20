@@ -1,19 +1,11 @@
-use core::{cell::UnsafeCell, ptr, slice};
+use core::{cell::UnsafeCell, mem, ptr, slice};
 
-use crate::{inter::CS, message_queue::{AsyncMessageQueue, Endpoints, QueueError, SyncMessageQueue}, messages::Message, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcState}, program::{AccessAttr, Program, Region}};
-
-pub const NUM_PROCESSES: usize = 3;
+use crate::{inter::CS, message_queue::QueueError, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcError, ProcState}, program::{AccessAttr, Program}};
 
 // If this is changed, must change Proc struct
 const NUM_PRIORITIES: usize = 256;
 
 pub const QUANTUM_MICROS: u32 = 1000;
-
-#[derive(Debug)]
-pub enum ProcError {
-    InvalidPID(u32),
-    InvalidState
-}
 
 pub struct Scheduler {
     // processes managed by scheduler
@@ -31,14 +23,18 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub const fn new(processes: &'static mut [UnsafeCell<Proc>]) -> Self {
+    pub const fn new() -> Self {
         Self { 
             start_proc: [ptr::null_mut(); NUM_PRIORITIES], 
             end_proc: [ptr::null_mut(); NUM_PRIORITIES],
             current: ptr::null_mut(),
             irq_events: [ptr::null_mut(); 32],
-            processes
+            processes: &mut [],
         }
+    }
+
+    pub fn init(&mut self, processes: &'static mut [UnsafeCell<Proc>]) {
+        self.processes = processes;
     }
 
     /// Creates a process 
@@ -49,14 +45,8 @@ impl Scheduler {
     pub unsafe fn create_proc(
         &mut self, 
         pid: u32, 
-        entry: u32, 
-        sp: u32, 
-        priority: u8, 
         program: &'static mut Program,
-        sync_queues: Option<&'static mut [SyncMessageQueue]>, 
-        sync_endpoints: Option<&'static Endpoints<SyncMessageQueue>>,
-        async_queues: Option<&'static mut [AsyncMessageQueue]>, 
-        async_endpoints: Option<&'static Endpoints<AsyncMessageQueue>>
+        r0: u32
         ) -> Result<u32, ProcError> {
         if (pid as usize) >= self.processes.len() {
             return Err(ProcError::InvalidPID(pid));
@@ -64,7 +54,7 @@ impl Scheduler {
         let proc = self.processes[pid as usize].get_mut();
         if proc.get_state() == ProcState::Free {
             unsafe {
-                proc.init(pid, entry, sp, priority, regions, sync_queues, sync_endpoints, async_queues, async_endpoints);
+                proc.init(pid, program, r0)?;
             }
             Ok(pid)
         } else {
@@ -163,6 +153,12 @@ impl Scheduler {
         self.switch_out_current();
     }
 
+    pub fn next_current_process(&mut self) {
+        if self.current.is_null() {
+            self.next_process()
+        }
+    }
+
     /// Obtains the next process to be scheduled
     pub fn next_process(&mut self) {
         let priority;
@@ -179,7 +175,7 @@ impl Scheduler {
         // if process with same priority as current, select it to be scheduled next or else
         // stick with current
         for (start, end) in self.start_proc[..priority].iter_mut().zip(self.end_proc[..priority].iter_mut()) {
-            // when goin to start of loop, it's because the last selected process is dead
+            // when going to start of loop, it's because the last selected process is dead
             while !start.is_null() {
                 // SAFETY
                 // entry is not null and proc should have been initialised
@@ -215,6 +211,45 @@ impl Scheduler {
         }
     }
 
+    pub fn reset_current(&mut self) {
+        if !self.current.is_null() {
+            let current = unsafe {
+                &mut *self.current
+            };
+            self.current = ptr::null_mut();
+            unsafe {
+                let program = current.program;
+                current.program = ptr::null_mut();
+                let program = &mut *program;
+                let driver = program.driver() as usize;
+                let r0 = if driver != 0 {
+                    program.regions[0].get_virt()
+                } else {
+                    0
+                };
+                // reset region data
+                for region in &mut program.regions {
+                    if region.enabled() {
+                        if region.should_zero() {
+                            let data: &mut [u8] = slice::from_raw_parts_mut(ptr::with_exposed_provenance_mut(region.get_virt() as usize), region.len as usize);
+                            data.fill(0);
+                        } else if region.get_virt() != region.phys_addr {
+                            let virt: &mut [u8] = slice::from_raw_parts_mut(ptr::with_exposed_provenance_mut(region.get_virt() as usize), region.len as usize);
+                            let phys: &[u8] = slice::from_raw_parts(ptr::with_exposed_provenance(region.phys_addr as usize), region.len as usize);
+                            virt.copy_from_slice(phys);
+                        }
+                    }
+                }
+                current.init(
+                    current.pid, 
+                    &mut *program, 
+                    r0
+                ).unwrap();
+                self.schedule_process(current.pid).unwrap();
+            }
+        }
+    }
+
     /// Suspends the current process to wait for IRQ number `irq`
     /// `irq` must be a valid IRQ number
     pub fn sleep_irq(&mut self, irq: u8) {
@@ -241,7 +276,7 @@ impl Scheduler {
             };
             let next = proc.next;
             if proc.get_state() == ProcState::Blocked {
-                proc.set_r0(irq as u32);
+                _ = proc.set_r0(irq as u32);
                 proc.set_state(ProcState::Running);
                 unsafe {
                     self.schedule_internal(proc);
@@ -254,15 +289,20 @@ impl Scheduler {
         self.irq_events[irq] = ptr::null_mut();
     }
 
-    pub fn send(&mut self, endpoint: u32, len: u32, data: u32) -> Result<(), QueueError> {
+    pub fn send(&mut self, endpoint: u32, len: u32, data: *mut u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
         };
-        if endpoint < current.num_sync_endpoints {
+        let program = unsafe {
+            & *current.program
+        };
+        if endpoint < program.num_sync_endpoints {
             // check access permissions
-            current.check_access(data, len, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
+            current.check_access(data.addr() as u32, len, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
+            let r1 = current.get_r1().map_err(|_| QueueError::InvalidMemoryAccess)?;
+            let r2 = current.get_r2().map_err(|_| QueueError::InvalidMemoryAccess)?;
             let queue = unsafe {
-                &mut **current.sync_endpoints.add(endpoint as usize)
+                &mut **program.sync_endpoints.add(endpoint as usize)
             };
             // block current process
             current.set_state(ProcState::Blocked);
@@ -273,11 +313,11 @@ impl Scheduler {
                 };
                 // set blocked processes message header
                 // pid
-                proc.set_r0(current.pid);
+                _ = proc.set_r0(current.pid);
                 // tag
-                proc.set_r1(current.get_r1());
+                _ = proc.set_r1(r1);
                 // message length
-                proc.set_r2(current.get_r2());
+                _ = proc.set_r2(r2);
                 // wake up blocked receiver
                 unsafe {
                     self.schedule_internal(queue.blocked);
@@ -296,38 +336,42 @@ impl Scheduler {
 
     /// SAFETY
     /// `data` contains a pointer to a `u8` buffer of length `len` 
-    pub unsafe fn send_async(&mut self, endpoint: u32, tag: u32, len: u32, data: u32) -> Result<(), QueueError> {
+    pub unsafe fn send_async(&mut self, endpoint: u32, tag: u32, len: u32, data: *mut u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
         };
-        if endpoint < current.num_async_endpoints {
-            current.check_access(data, len, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
+        let program = unsafe {
+            & *current.program
+        };
+        if endpoint < program.num_async_endpoints {
+            current.check_access(data.addr() as u32, len, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
             let queue = unsafe {
-                &mut **current.async_endpoints.add(endpoint as usize)
+                &mut **program.async_endpoints.add(endpoint as usize)
             };
             let data = unsafe {
-                slice::from_raw_parts(ptr::with_exposed_provenance_mut(data as usize), len as usize)
+                slice::from_raw_parts(data, len as usize)
             };
-            if let Some(msg) = Message::new(current.pid, tag, data) {
-                queue.send(msg)?;
-                if !queue.blocked.is_null() {
-                    let proc = unsafe {
-                        &mut *queue.blocked
-                    };
-                    // set blocked processes message header
-                    proc.set_r0(current.pid);
-                    proc.set_r1(tag);
-                    proc.set_r2(len);
-                    // wake up blocked receiver
-                    unsafe {
-                        self.schedule_internal(queue.blocked);
-                    }
-                    queue.blocked = ptr::null_mut();
+            let header = MessageHeader {
+                pid: current.pid,
+                tag,
+                len
+            };
+            queue.send(header, data)?;
+            if !queue.blocked.is_null() {
+                let proc = unsafe {
+                    &mut *queue.blocked
+                };
+                // set blocked processes message header
+                _ = proc.set_r0(current.pid);
+                _ = proc.set_r1(tag);
+                _ = proc.set_r2(len);
+                // wake up blocked receiver
+                unsafe {
+                    self.schedule_internal(queue.blocked);
                 }
-                Ok(())
-            } else {
-                Err(QueueError::BufferTooLarge)
+                queue.blocked = ptr::null_mut();
             }
+            Ok(())
         } else {
             Err(QueueError::InvalidQueue(endpoint))
         }
@@ -337,15 +381,18 @@ impl Scheduler {
         let current = unsafe {
             &mut *self.current
         };
-        if queue < current.num_sync_queues {
+        let program = unsafe {
+            & *current.program
+        };
+        if queue < program.num_sync_queues {
             let queue = unsafe {
-                &mut *current.sync_queues.add(queue as usize)
+                &mut *program.sync_queues.add(queue as usize)
             };
             match queue.read_header() {
                 Ok(header) => {
-                    current.set_r0(header.pid);
-                    current.set_r1(header.tag);
-                    current.set_r2(header.len);
+                    _ = current.set_r0(header.pid);
+                    _ = current.set_r1(header.tag);
+                    _ = current.set_r2(header.len);
                     Ok(())
                 },
                 Err(err) => {
@@ -369,15 +416,18 @@ impl Scheduler {
         let current = unsafe {
             &mut *self.current
         };
-        if queue < current.num_async_queues {
+        let program = unsafe {
+            & *current.program
+        };
+        if queue < program.num_async_queues {
             let queue = unsafe {
-                &mut *current.async_queues.add(queue as usize)
+                &mut *program.async_queues.add(queue as usize)
             };
             match queue.read_header() {
                 Ok(header) => {
-                    current.set_r0(header.pid);
-                    current.set_r1(header.tag);
-                    current.set_r2(header.len);
+                    _ = current.set_r0(header.pid);
+                    _ = current.set_r1(header.tag);
+                    _ = current.set_r2(header.len);
                     Ok(())
                 },
                 Err(err) => {
@@ -403,16 +453,19 @@ impl Scheduler {
         let current = unsafe {
             &mut *self.current
         };
-        if queue < current.num_sync_endpoints {
+        let program = unsafe {
+            & *current.program
+        };
+        if queue < program.num_sync_queues {
             let queue = unsafe {
-                &mut *current.sync_queues.add(queue as usize)
+                &mut *program.sync_queues.add(queue as usize)
             };
             // check access is valid
             current.check_access(buffer as u32, len, AccessAttr::new(false, true, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
             let buffer = unsafe {
                 slice::from_raw_parts_mut(buffer, len as usize)
             };
-            current.set_r0(queue.read_data(buffer)? as u32);
+            _ = current.set_r0(queue.read_data(buffer)? as u32);
             Ok(())
         } else {
             Err(QueueError::InvalidQueue(queue))
@@ -425,32 +478,46 @@ impl Scheduler {
         let current = unsafe {
             &mut *self.current
         };
-        if queue < current.num_async_endpoints {
+        let program = unsafe {
+            & *current.program
+        };
+        if queue < program.num_async_queues {
             let queue = unsafe {
-                &mut *current.async_queues.add(queue as usize)
+                &mut *program.async_queues.add(queue as usize)
             };
             // check access is valid
             current.check_access(buffer as u32, len, AccessAttr::new(false, true, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
             let buffer = unsafe {
                 slice::from_raw_parts_mut(buffer, len as usize)
             };
-            current.set_r0(queue.read_data(buffer)? as u32);
+            _ = current.set_r0(queue.read_data(buffer)? as u32);
             Ok(())
         } else {
             Err(QueueError::InvalidQueue(queue))
         }
     }
 
-    pub fn reply(&mut self, queue: u32, msg: u32) -> Result<(), QueueError> {
+    pub fn reply(&mut self, queue: u32, msg: u32, len: u32, buffer: *const u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
         };
-        if queue < current.num_sync_queues {
+        let program = unsafe {
+            & *current.program
+        };
+        if queue < program.num_sync_queues {
             let queue = unsafe {
-                &mut *current.sync_queues.add(queue as usize)
+                &mut *program.sync_queues.add(queue as usize)
+            };
+            let buffer = if len > 0 {
+                current.check_access(buffer.addr() as u32, len, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
+                unsafe {
+                    Some(slice::from_raw_parts(buffer, len as usize))
+                }
+            } else {
+                None
             };
             // wake up sender and send reply
-            let sender = queue.reply(msg)?;
+            let sender = queue.reply(msg, buffer)?;
             unsafe {
                 self.schedule_internal(&raw mut *sender);
             }
@@ -500,13 +567,11 @@ pub fn get_cpuid() -> u32 {
 /// Gets the scheduler for this core
 /// core 0 gets scheduler 0 while core 1 gets scheduler 1
 pub fn scheduler<'a, 'b>(cs: &'b CS) -> IRQGuard<'a, 'b, Scheduler> {
-    static mut PROCESSES0: [UnsafeCell<Proc>; NUM_PROCESSES] = [const { UnsafeCell::new(Proc::new()) }; NUM_PROCESSES];
-    static mut PROCESSES1: [UnsafeCell<Proc>; 0] = [const { UnsafeCell::new(Proc::new()) }; 0];
     static SCHEDULER0: IRQMutex<Scheduler> = unsafe {
-        IRQMutex::new(Scheduler::new(&mut *(&raw mut PROCESSES0)))
+        IRQMutex::new(Scheduler::new())
     };
     static SCHEDULER1: IRQMutex<Scheduler> = unsafe {
-        IRQMutex::new(Scheduler::new(&mut *(&raw mut PROCESSES1)))
+        IRQMutex::new(Scheduler::new())
     };
     let cpuid = get_cpuid();
     if cpuid == 0 {

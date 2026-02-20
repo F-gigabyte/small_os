@@ -1,52 +1,15 @@
-use core::slice;
-
-use crate::proc::Proc;
-
 // Based on https://wiki.osdev.org/Message_Passing_Tutorial accessed 2/02/2026
 // Based on https://wiki.osdev.org/Message_Passing accessed 2/02/2026
 // Based on https://www.qnx.com/developers/docs/8.0/com.qnx.doc.neutrino.getting_started/topic/s1_msg_Message_handling.html accessed 2/02/2026
 // Based on https://sel4.systems/Info/Docs/seL4-manual-latest.pdf accessed 2/02/2026
 // Based on https://www.freertos.org/Documentation/02-Kernel/02-Kernel-features/02-Queues-mutexes-and-semaphores/01-Queues accessed 2/02/2026
 
-
-pub const MESSAGE_DIRECT_LEN: usize = 4;
-
-pub const MAX_ASYNC_MESSAGE_LEN: usize = 128;
-
-pub union MessageBody {
-    pub direct: [u8; MESSAGE_DIRECT_LEN],
-    pub indirect: *const u8
-}
-
+#[repr(C)]
 #[derive(Debug, Clone)]
 pub struct MessageHeader {
     pub pid: u32,
     pub tag: u32,
     pub len: u32,
-}
-
-pub struct Message {
-    pub header: MessageHeader,
-    pub body: [u8; MAX_ASYNC_MESSAGE_LEN]
-}
-
-impl Message {
-    pub fn new(pid: u32, tag: u32, data: &[u8]) -> Option<Self> {
-        if data.len() > MAX_ASYNC_MESSAGE_LEN {
-            None
-        } else {
-            let mut body = [0; MAX_ASYNC_MESSAGE_LEN];
-            body[..data.len()].copy_from_slice(data);
-            Some(Self {
-                header: MessageHeader { 
-                    pid,
-                    tag, 
-                    len: data.len() as u32 
-                },
-                body
-            })
-        }
-    }
 }
 
 #[cfg(test)]

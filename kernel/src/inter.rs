@@ -29,22 +29,21 @@ pub enum SysCall {
         code: u32
     },
     // 2
-    WaitIRQ {
-        irq: u32
-    },
+    WaitIRQ {},
     // 3
     Send {
         endpoint: u32,
         tag: u32,
+        // 0..16 -> send len, 16..32 -> receive len
         len: u32,
-        data: u32
+        data: *mut u8
     },
     // 4
     SendAsync {
         endpoint: u32,
         tag: u32,
         len: u32,
-        data: u32
+        data: *mut u8
     },
     // 5
     Header {
@@ -77,8 +76,22 @@ pub enum SysCall {
     // 11
     Reply {
         queue: u32,
-        msg: u32
+        msg: u32,
+        len: u32,
+        buffer: *const u8
     },
+}
+
+pub enum IRQError {
+    NoIRQ
+}
+
+impl From<IRQError> for u32 {
+    fn from(value: IRQError) -> Self {
+        match value {
+            IRQError::NoIRQ => 0
+        }
+    }
 }
 
 impl TryFrom<&StackTrace> for SysCall {
@@ -92,20 +105,18 @@ impl TryFrom<&StackTrace> for SysCall {
             1 => Ok(SysCall::Exit { 
                 code: stack.r0
             }),
-            2 => Ok(SysCall::WaitIRQ { 
-                irq: stack.r1 
-            }),
+            2 => Ok(SysCall::WaitIRQ {}),
             3 => Ok(SysCall::Send { 
                 endpoint: stack.r0,
                 tag: stack.r1,
                 len: stack.r2,
-                data: stack.r3
+                data: ptr::with_exposed_provenance_mut(stack.r3 as usize)
             }),
             4 => Ok(SysCall::SendAsync { 
                 endpoint: stack.r0,
                 tag: stack.r1,
                 len: stack.r2,
-                data: stack.r3
+                data: ptr::with_exposed_provenance_mut(stack.r3 as usize)
             }),
             5 => Ok(SysCall::Header { 
                 queue: stack.r0,
@@ -131,7 +142,9 @@ impl TryFrom<&StackTrace> for SysCall {
             }),
             11 => Ok(SysCall::Reply { 
                 queue: stack.r0, 
-                msg: stack.r1 
+                msg: stack.r1,
+                len: stack.r2,
+                buffer: ptr::with_exposed_provenance(stack.r3 as usize)
             }),
             _ => Err(())
         }
@@ -162,40 +175,66 @@ pub struct UpperStackTrace {
     r11: u32
 }
 
+const PROC_MASK: u32 = 0x8;
+
 #[unsafe(no_mangle)]
-pub extern "C" fn nmi(trace: *mut StackTrace) -> ! {
-    let trace = unsafe {
-        &*trace
-    };
-    println!("NMI!");
-    println!("Registers");
-    println!("\tr0: {:x}", trace.r0);
-    println!("\tr1: {:x}", trace.r1);
-    println!("\tr2: {:x}", trace.r2);
-    println!("\tr3: {:x}", trace.r3);
-    println!("\tr12: {:x}", trace.r12);
-    println!("\tlr: {:x}", trace.lr);
-    println!("\tret_addr: {:x}", trace.ret_addr);
-    println!("\txpsr: {:x}", trace.xpsr);
-    panic!();
+pub extern "C" fn nmi(trace: *mut StackTrace, lr: u32) -> *mut Proc {
+    if lr & PROC_MASK != 0 {
+        // recoverable hard fault in application
+        let cs = unsafe {
+            CS::new()
+        };
+        // reset current process and hope it doesn't die again
+        let mut scheduler = scheduler(&cs);
+        scheduler.reset_current();
+        scheduler.next_process();
+        scheduler.get_current()
+    } else {
+        let trace = unsafe {
+            &*trace
+        };
+        println!("Hard Fault!");
+        println!("Registers");
+        println!("\tr0: {:x}", trace.r0);
+        println!("\tr1: {:x}", trace.r1);
+        println!("\tr2: {:x}", trace.r2);
+        println!("\tr3: {:x}", trace.r3);
+        println!("\tr12: {:x}", trace.r12);
+        println!("\tlr: {:x}", trace.lr);
+        println!("\tret_addr: {:x}", trace.ret_addr);
+        println!("\txpsr: {:x}", trace.xpsr);
+        panic!();
+    }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn hard_fault(trace: *mut StackTrace) -> ! {
-    let trace = unsafe {
-        &*trace
-    };
-    println!("Hard Fault!");
-    println!("Registers");
-    println!("\tr0: {:x}", trace.r0);
-    println!("\tr1: {:x}", trace.r1);
-    println!("\tr2: {:x}", trace.r2);
-    println!("\tr3: {:x}", trace.r3);
-    println!("\tr12: {:x}", trace.r12);
-    println!("\tlr: {:x}", trace.lr);
-    println!("\tret_addr: {:x}", trace.ret_addr);
-    println!("\txpsr: {:x}", trace.xpsr);
-    panic!();
+pub extern "C" fn hard_fault(trace: *mut StackTrace, lr: u32) -> *mut Proc {
+    if lr & PROC_MASK != 0 {
+        // recoverable hard fault in application
+        let cs = unsafe {
+            CS::new()
+        };
+        // reset current process and hope it doesn't die again
+        let mut scheduler = scheduler(&cs);
+        scheduler.reset_current();
+        scheduler.next_process();
+        scheduler.get_current()
+    } else {
+        let trace = unsafe {
+            &*trace
+        };
+        println!("Hard Fault!");
+        println!("Registers");
+        println!("\tr0: {:x}", trace.r0);
+        println!("\tr1: {:x}", trace.r1);
+        println!("\tr2: {:x}", trace.r2);
+        println!("\tr3: {:x}", trace.r3);
+        println!("\tr12: {:x}", trace.r12);
+        println!("\tlr: {:x}", trace.lr);
+        println!("\tret_addr: {:x}", trace.ret_addr);
+        println!("\txpsr: {:x}", trace.xpsr);
+        panic!();
+    }
 }
 
 /// IRQ handler
@@ -245,18 +284,21 @@ fn do_sys_call(sys_call: SysCall, stack: &mut StackTrace, cs: &CS) -> Result<(),
             Ok(())
         },
         // wait for IRQ
-        SysCall::WaitIRQ { 
-            irq 
-        } => {
-            if irq < 32 {
-                let mut scheduler = scheduler(&cs);
-                scheduler.sleep_irq(irq as u8);
+        SysCall::WaitIRQ {} => {
+            let mut scheduler = scheduler(cs);
+            let current = scheduler.get_current();
+            let program = unsafe {
+                & *(*current).program
+            };
+
+            if let Some(inter) = program.interrupt() {
+                scheduler.sleep_irq(inter);
                 let mut nvic = NVIC.lock(&cs);
                 // enable the IRQ for firing
-                nvic.enable_irq(irq as u8);
+                nvic.enable_irq(inter);
                 Ok(())
             } else {
-                Err(0)
+                Err(u32::from(IRQError::NoIRQ))
             }
         },
         // send message
@@ -326,10 +368,12 @@ fn do_sys_call(sys_call: SysCall, stack: &mut StackTrace, cs: &CS) -> Result<(),
         },
         SysCall::Reply { 
             queue, 
-            msg 
+            msg,
+            len,
+            buffer 
         } => {
             let mut scheduler = scheduler(cs);
-            scheduler.reply(queue, msg).map_err(|err| u32::from(err))
+            scheduler.reply(queue, msg, len, buffer).map_err(|err| u32::from(err))
         },
     }
 }
@@ -361,7 +405,8 @@ pub extern "C" fn sys_call(stack: *mut StackTrace) -> *mut Proc {
         }
     }
     let mut scheduler = scheduler(&cs);
-    scheduler.next_process();
+    // only switch out if current is blocked or its time slice expired
+    scheduler.next_current_process();
     scheduler.get_current()
 }
 

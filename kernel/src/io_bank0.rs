@@ -46,16 +46,16 @@ mod gpio_ctrl_register {
 struct IOBank0Registers {
     // GP0
     _reserved0: u32,
-    _reserved1: u32,
+    gp0_ctrl: ReadPureWrite<u32>,
     // GP1
     _reserved2: u32,
-    _reserved3: u32,
+    gp1_ctrl: ReadPureWrite<u32>,
     // GP2
     _reserved4: u32,
-    _reserved5: u32,
+    gp2_ctrl: ReadPureWrite<u32>,
     // GP3
     _reserved6: u32,
-    _reserved7: u32,
+    gp3_ctrl: ReadPureWrite<u32>,
     // GP4
     _reserved8: u32,
     gp4_ctrl: ReadPureWrite<u32>,
@@ -93,6 +93,18 @@ impl IOBank0 {
         field!(self.registers, gp5_ctrl).write(val);
         field!(self.registers, gp6_ctrl).write(val);
         field!(self.registers, gp7_ctrl).write(val);
+    }
+    
+    pub fn set_gpio_uart0(&mut self) {
+        let val = ((2 << gpio_ctrl_register::FUNCSEL_SHIFT) & gpio_ctrl_register::FUNCSEL_MASK) |
+            gpio_ctrl_register::OUTOVER_NORMAL |
+            gpio_ctrl_register::OEOVER_NORMAL |
+            gpio_ctrl_register::INOVER_NORMAL |
+            gpio_ctrl_register::IRQOVER_NORMAL;
+        field!(self.registers, gp0_ctrl).write(val);
+        field!(self.registers, gp1_ctrl).write(val);
+        field!(self.registers, gp2_ctrl).write(val);
+        field!(self.registers, gp3_ctrl).write(val);
     }
 }
 

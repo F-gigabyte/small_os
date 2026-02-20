@@ -3,9 +3,11 @@
 
 #![no_std]
 #![no_main]
-#![reexport_test_harness_main = "test_main"]
 
-use core::{arch::asm, intrinsics::abort, panic::PanicInfo};
+use core::{arch::asm, fmt::{self, Write}, intrinsics::abort, panic::PanicInfo};
+
+use small_os_lib::send_empty;
+
 
 /// panic handler
 /// this function is called when a panic happens
@@ -14,39 +16,46 @@ fn panic(_info: &PanicInfo) -> ! {
     abort()
 }
 
-unsafe fn do_syscall(num: u32, mut arg0: u32, mut arg1: u32, mut arg2: u32, mut arg3: u32) -> Result<(u32, u32, u32, u32), u32>{
-    let mut res: u32;
-    unsafe {
-        asm!(
-            "mov r12, {num}",
-            "svc 0",
-            "mov {res}, r12",
-            num = in(reg) num,
-            inout("r0") arg0 => arg0,
-            inout("r1") arg1 => arg1,
-            inout("r2") arg2 => arg2,
-            inout("r3") arg3 => arg3,
-            res = out(reg) res
-        )
-    }
-    match res {
-        0 => {
-            Ok((arg0, arg1, arg2, arg3))
-        },
-        _ => {
-            Err(num)
+struct UARTPrint {}
+
+impl Write for UARTPrint {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let data = s.as_bytes();
+        let mut pos = 0;
+        for _ in 0..data.len() / 32 {
+            send_empty(0, 0, &data[pos..pos + 32]).map_err(|_| fmt::Error)?;
+            pos += 32;
         }
+        if pos < data.len() {
+            send_empty(0, 0, &data[pos..]).map_err(|_| fmt::Error)?;
+        }
+        Ok(())
     }
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => ($crate::_print(format_args!($($arg)*)));
+}
+
+#[macro_export]
+macro_rules! println {
+    () => ($crate::print!("\n"));
+    ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
+}
+
+#[doc(hidden)]
+pub fn _print(args: fmt::Arguments) {
+    let mut print = UARTPrint {};
+    let res = print.write_fmt(args);
+    res.unwrap();
 }
 
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
-    let text = "This is test proc!".as_bytes();
     loop {
-        unsafe {
-            _ = do_syscall(0, text.as_ptr() as u32, text.len() as u32, 0, 0).unwrap();
-        }
+        println!("This is test proc!\r");
     }
 }

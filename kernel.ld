@@ -10,32 +10,34 @@ ENTRY(_start);
 SECTIONS {
     __stack_size = 0x2000;
 
-    . = ORIGIN(FLASH);
     .bootloader : {
         KEEP(*(.bootloader));
         KEEP(*(.bootloader.*));
-    } > FLASH
+    }
 
     .text.vectors : {
         KEEP(*(.text.vectors));
-    } > FLASH
+    }
 
     .text : {
         *(.text);
         *(.text.*);
-    } > FLASH
+    }
     
     .rodata : {
         *(.rodata);
         *(.rodata.*);
-    } > FLASH
+    }
     
-    .data ORIGIN(RAM) + 0x2000 : {
+    .data : {
         *(.data);
         *(.data.*);
+    }
+
+    .bss : {
         *(.bss);
         *(.bss.*);
-    } > RAM AT > FLASH
+    }
 
     __ram_start = ORIGIN(RAM);
     __ram_end = ORIGIN(RAM) + LENGTH(RAM);

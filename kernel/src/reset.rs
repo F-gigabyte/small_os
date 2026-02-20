@@ -8,11 +8,13 @@ mod reset_register {
     pub const IO_BANK0_SHIFT: usize = 5;
     pub const PLL_SYS_SHIFT: usize = 12;
     pub const TIMER_SHIFT: usize = 21;
+    pub const UART0_SHIFT: usize = 22;
     pub const UART1_SHIFT: usize = 23;
 
     pub const IO_BANK0_MASK: u32 = 1 << IO_BANK0_SHIFT;
     pub const PLL_SYS_MASK: u32 = 1 << PLL_SYS_SHIFT;
     pub const TIMER_MASK: u32 = 1 << TIMER_SHIFT;
+    pub const UART0_MASK: u32 = 1 << UART0_SHIFT;
     pub const UART1_MASK: u32 = 1 << UART1_SHIFT;
 }
 
@@ -63,10 +65,11 @@ impl Reset {
         while field!(self.registers, reset_done).read() & reset_register::PLL_SYS_MASK == 0 {}
     }
 
-    pub fn reset_uart1(&mut self) {
-        field!(self.set_reg, reset).write(reset_register::UART1_MASK);
-        field!(self.clear_reg, reset).write(reset_register::UART1_MASK);
+    pub fn reset_uarts(&mut self) {
+        field!(self.set_reg, reset).write(reset_register::UART1_MASK | reset_register::UART0_MASK);
+        field!(self.clear_reg, reset).write(reset_register::UART1_MASK | reset_register::UART0_MASK);
         while field!(self.registers, reset_done).read() & reset_register::UART1_MASK == 0 {}
+        while field!(self.registers, reset_done).read() & reset_register::UART0_MASK == 0 {}
     }
 
     pub fn reset_timer(&mut self) {

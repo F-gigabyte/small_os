@@ -1,11 +1,27 @@
+async_message_len = 128
+
 [kernel]
-priority = 0
-driver = 0
 debug_src = "target/thumbv6m-none-eabi/debug/kernel"
 release_src = "target/thumbv6m-none-eabi/release/kernel"
 
-[test_driver]
+[[programs]]
+name = "test_driver"
 priority = 0
 driver = 0
 debug_src = "target/thumbv6m-none-eabi/debug/test_driver"
 release_src = "target/thumbv6m-none-eabi/release/test_driver"
+num_sync_queues = 0
+async_queues = []
+sync_endpoints = [{ name = "uart", queue = 0 }]
+async_endpoints = []
+
+[[programs]]
+name = "uart"
+priority = 0
+driver = 1
+debug_src = "target/thumbv6m-none-eabi/debug/uart"
+release_src = "target/thumbv6m-none-eabi/release/uart"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = []
+async_endpoints = []

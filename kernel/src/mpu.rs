@@ -231,7 +231,10 @@ pub unsafe fn switch_regions(proc: *mut Proc) -> *mut Proc {
         CS::new()
     };
     let mut mpu = MPU.lock(&cs);
-    for (i, region) in proc.regions.iter().enumerate() {
+    let program = unsafe {
+        & *proc.program
+    };
+    for (i, region) in program.regions.iter().enumerate() {
         mpu.map_region(region, MPURegion::try_from(i).unwrap()).unwrap();
     }
     proc

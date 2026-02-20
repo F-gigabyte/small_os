@@ -10,9 +10,9 @@
 #![no_main]
 #![reexport_test_harness_main = "test_main"]
 
-use core::{intrinsics::abort, panic::PanicInfo, ptr};
+use core::{intrinsics::abort, panic::PanicInfo};
 
-use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, message_queue::{SYNC_ENDPOINTS1, SYNC_ENDPOINTS2, SYNC_QUEUES1, SYNC_QUEUES2}, mutex::force_spinlock_unlock, nvic::{NVIC, irqs}, pll::PLL, program::{PROGRAM_TABLE, ProgramTable}, reset::RESET, rosc::ROSC, scheduler::scheduler, system::SYSTEM, test_proc::{test_func, test_func2, test_func3}, timer::{TIMER, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
+use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, mutex::force_spinlock_unlock, nvic::{NVIC, irqs}, pll::PLL, program::init_processes, reset::RESET, rosc::ROSC, system::SYSTEM, timer::{TIMER, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
 
 pub mod uart;
 pub mod reset;
@@ -41,7 +41,6 @@ pub mod mpu;
 
 unsafe extern "C" {
     static __stack: u8;
-    static __program_table: u8;
 }
 
 /// panic handler
@@ -109,11 +108,12 @@ pub extern "C" fn main() -> ! {
         let mut rosc = ROSC.lock(&cs);
         rosc.disable();
         reset.reset_iobank0();
-        reset.reset_uart1();
+        reset.reset_uarts();
         reset.reset_timer();
 
         let mut io_bank0 = IOBANK0.lock(&cs);
         io_bank0.set_gpio_uart1();
+        io_bank0.set_gpio_uart0();
 
         {
             let mut uart1 = UART1.lock(&cs);
@@ -127,51 +127,8 @@ pub extern "C" fn main() -> ! {
         let mut nvic = NVIC.lock(&cs);
         nvic.enable_irq(irqs::TIMER0);
         {
-            let mut scheduler = scheduler(&cs);
-            let mut program_table = PROGRAM_TABLE.lock();
-            if program_table.is_none() {
-                unsafe {
-                    *program_table = Some(ProgramTable::new((&__program_table) as *const _ as usize));
-                }
-            }
-            let program_table = program_table.as_ref().unwrap();
-            let mut current_pid = 0;
-            for program in program_table.table() {
-                for region in &program.regions {
-                    if region.enabled() {
-                        let phys_addr = region.get_phys();
-                        let virt_addr = region.get_virt();
-                        println!("phys address: 0x{:x}", phys_addr);
-                        println!("virt address: 0x{:x}", virt_addr);
-                        if let Err(err) = region.get_attr() {
-                            panic!("Have invalid region permission bits of 0b{:b}", err);
-                        }
-                        if !region.len.is_power_of_two() || region.len < 256 {
-                            panic!("Have invalid region size of {}", region.len);
-                        }
-                        if !virt_addr.is_multiple_of(region.len) {
-                            panic!("Have invalid region alignment with address 0x{:x} for size 0x{:x}", virt_addr, region.len);
-                        }
-                        if phys_addr != virt_addr {
-                            let mut phys_ptr: *const u32 = ptr::with_exposed_provenance(phys_addr as usize);
-                            let mut virt_ptr: *mut u32 = ptr::with_exposed_provenance_mut(virt_addr as usize);
-                            for _ in 0..region.len / 4 {
-                                unsafe {
-                                    virt_ptr.write_volatile(phys_ptr.read_volatile());
-                                    phys_ptr = phys_ptr.add(1);
-                                    virt_ptr = virt_ptr.add(1);
-                                }
-                            }
-                        }
-                    }
-                }
-                println!("Entry: 0x{:x}", program.entry);
-                println!("Stack: 0x{:x}", program.sp);
-                let pid = unsafe {
-                    scheduler.create_proc(current_pid, program.entry, program.sp, program.priority(), &program.regions, None, None, None, None).unwrap()
-                };
-                scheduler.schedule_process(pid).unwrap();
-                current_pid += 1;
+            unsafe {
+                init_processes(&cs);
             }
         }
         let mut sys = SYSTEM.lock(&cs);

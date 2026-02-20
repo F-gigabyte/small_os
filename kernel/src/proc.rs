@@ -1,6 +1,6 @@
 use core::ptr;
 
-use crate::{message_queue::{AsyncMessageQueue, Endpoints, MessageQueue, SyncMessageQueue}, program::{AccessAttr, Program, Region, RegionAttr}};
+use crate::{program::{AccessAttr, Program, Region}};
 
 mod proc_flags {
     pub const PRIORITY_SHIFT: usize = 0;
@@ -35,6 +35,27 @@ impl TryFrom<u32> for ProcState {
     }
 }
 
+fn check_region_access(addr: u32, len: u32, perm: AccessAttr, regions: &[Region]) -> Result<u32, ()> {
+    for region in regions {
+        if region.enabled() {
+            let start = region.get_virt();
+            let end = start + region.len;
+            if start <= addr && addr + len <= end && region.get_attr().unwrap().access_valid(perm) {
+                return Ok(addr)
+            }
+        }
+    }
+    Err(())
+}
+
+#[derive(Debug)]
+pub enum ProcError {
+    InvalidPID(u32),
+    InvalidState,
+    StackTooSmall,
+    NotOnStack
+}
+
 #[repr(C)]
 pub struct Proc {
     pub r4: u32,
@@ -48,16 +69,8 @@ pub struct Proc {
     pub pid: u32,
     pub psp: u32,
     pub flags: u32,
-    pub program: *const Program,
+    pub program: *mut Program,
     pub next: *mut Proc,
-    pub num_sync_queues: u32,
-    pub num_sync_endpoints: u32,
-    pub sync_queues: *mut SyncMessageQueue,
-    pub sync_endpoints: *const *mut SyncMessageQueue,
-    pub num_async_queues: u32,
-    pub num_async_endpoints: u32,
-    pub async_queues: *mut AsyncMessageQueue,
-    pub async_endpoints: *const *mut AsyncMessageQueue
 }
 
 impl Proc {
@@ -75,15 +88,7 @@ impl Proc {
             psp: 0, // sp (0x24)
             flags: 0, // (0x28) 
             program: ptr::null_mut(), // (0x2c)
-            next: ptr::null_mut(), // (0x30)
-            num_sync_queues: 0, // (0x34)
-            num_sync_endpoints: 0, // (0x38)
-            sync_queues: ptr::null_mut(), // (0x3c)
-            sync_endpoints: ptr::null(), // (0x40)
-            num_async_queues: 0, // (0x44)
-            num_async_endpoints: 0, // (0x48)
-            async_queues: ptr::null_mut(), // (0x4c)
-            async_endpoints: ptr::null() // (0x50)
+            next: ptr::null_mut() // (0x30)
         }
     }
 
@@ -102,81 +107,98 @@ impl Proc {
         ((self.flags & proc_flags::PRIORITY_MASK) >> proc_flags::PRIORITY_SHIFT) as u8
     }
 
-    pub fn set_r0(&mut self, r0: u32) {
+    pub fn set_r0(&mut self, r0: u32) -> Result<(), ProcError> {
+        self.check_access(self.psp, 4, AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
         let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
         unsafe {
             *stack = r0;
         }
+        Ok(())
     }
     
-    pub fn set_r1(&mut self, r1: u32) {
+    pub fn set_r1(&mut self, r1: u32) -> Result<(), ProcError> {
+        self.check_access(self.psp + 4, 4, AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
         let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
         unsafe {
             *stack.add(1) = r1;
         }
+        Ok(())
     }
     
-    pub fn set_r2(&mut self, r2: u32) {
+    pub fn set_r2(&mut self, r2: u32) -> Result<(), ProcError> {
+        self.check_access(self.psp + 8, 4, AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
         let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
         unsafe {
             *stack.add(2) = r2;
         }
+        Ok(())
     }
     
-    pub fn set_r3(&mut self, r3: u32) {
+    pub fn set_r3(&mut self, r3: u32) -> Result<(), ProcError> {
+        self.check_access(self.psp + 12, 4, AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
         let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
         unsafe {
             *stack.add(3) = r3;
         }
+        Ok(())
     }
     
-    pub fn set_r12(&mut self, r12: u32) {
+    pub fn set_r12(&mut self, r12: u32) -> Result<(), ProcError> {
+        self.check_access(self.psp + 16, 4, AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
         let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
         unsafe {
             *stack.add(4) = r12;
         }
+        Ok(())
     }
     
-    pub fn get_r0(&mut self) -> u32 {
+    pub fn get_r0(&mut self) -> Result<u32, ProcError> {
+        self.check_access(self.psp, 4, AccessAttr::new(true, false, false)).map_err(|_| ProcError::NotOnStack)?;
         let stack: *const u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
         unsafe {
-            *stack
+            Ok(*stack)
         }
     }
     
-    pub fn get_r1(&mut self) -> u32 {
+    pub fn get_r1(&mut self) -> Result<u32, ProcError> {
+        self.check_access(self.psp + 4, 4, AccessAttr::new(true, false, false)).map_err(|_| ProcError::NotOnStack)?;
         let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
         unsafe {
-            *stack.add(1)
+            Ok(*stack.add(1))
         }
     }
     
-    pub fn get_r2(&mut self) -> u32 {
+    pub fn get_r2(&mut self) -> Result<u32, ProcError> {
+        self.check_access(self.psp + 8, 4, AccessAttr::new(true, false, false)).map_err(|_| ProcError::NotOnStack)?;
         let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
         unsafe {
-            *stack.add(2)
+            Ok(*stack.add(2))
         }
     }
     
-    pub fn get_r3(&mut self) -> u32 {
+    pub fn get_r3(&mut self) -> Result<u32, ProcError> {
+        self.check_access(self.psp + 12, 4, AccessAttr::new(true, false, false)).map_err(|_| ProcError::NotOnStack)?;
         let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
         unsafe {
-            *stack.add(3)
+            Ok(*stack.add(3))
         }
     }
     
-    pub fn get_r12(&mut self) -> u32 {
+    pub fn get_r12(&mut self) -> Result<u32, ProcError> {
+        self.check_access(self.psp + 16, 4, AccessAttr::new(true, false, false)).map_err(|_| ProcError::NotOnStack)?;
         let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
         unsafe {
-            *stack.add(4)
+            Ok(*stack.add(4))
         }
     }
     
-    pub fn set_lr(&mut self, lr: u32) {
+    pub fn set_lr(&mut self, lr: u32) -> Result<(), ProcError> {
+        self.check_access(self.psp + 20, 4, AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
         let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
         unsafe {
             *stack.add(5) = lr;
         }
+        Ok(())
     }
 
     // SAFETY
@@ -186,47 +208,30 @@ impl Proc {
         &mut self, 
         pid: u32, 
         program: &'static mut Program,
-        mut sync_queues: Option<&'static mut [SyncMessageQueue]>, 
-        sync_endpoints: Option<&'static Endpoints<SyncMessageQueue>>,
-        mut async_queues: Option<&'static mut [AsyncMessageQueue]>,
-        async_endpoints: Option<&'static Endpoints<AsyncMessageQueue>>,
-        ) {
+        r0: u32
+        ) -> Result<(), ProcError> {
         let mut sp = program.sp;
         sp -= 8 * 4;
+        check_region_access(sp, 8 * 4, AccessAttr::new(true, true, false), &program.regions).map_err(|_| ProcError::StackTooSmall)?;
         let stack: &mut [u32; 8] = unsafe {
             // reserve 8 registers for initial setup
             &mut *ptr::with_exposed_provenance_mut(sp as usize)
         };
+        stack[0] = r0;
         stack[6] = program.entry;
         stack[7] = 0x01000000; // set thumb mode but nothing else
         self.pid = pid;
         self.psp = sp;
         self.flags = (program.priority() as u32) << proc_flags::PRIORITY_SHIFT | ((ProcState::Init as u32) << proc_flags::STATE_SHIFT);
         self.program = program;
-        self.sync_queues = sync_queues.as_mut().map(|sync_queues| sync_queues.as_mut_ptr()).unwrap_or(ptr::null_mut());
-        self.num_sync_queues = sync_queues.map(|sync_queues| sync_queues.len()).unwrap_or(0) as u32;
-        self.sync_endpoints = sync_endpoints.map(|sync_endpoints| sync_endpoints.as_ptr()).unwrap_or(ptr::null());
-        self.num_sync_endpoints = sync_endpoints.map(|sync_endpoints| sync_endpoints.len()).unwrap_or(0) as u32;
-        self.async_queues = async_queues.as_mut().map(|async_queues| async_queues.as_mut_ptr()).unwrap_or(ptr::null_mut());
-        self.num_async_queues = async_queues.map(|async_queues| async_queues.len()).unwrap_or(0) as u32;
-        self.async_endpoints = async_endpoints.map(|async_endpoints| async_endpoints.as_ptr()).unwrap_or(ptr::null_mut());
-        self.num_async_endpoints = async_endpoints.map(|async_endpoints| async_endpoints.len()).unwrap_or(0) as u32;
+        Ok(())
     }
 
     pub fn check_access(&self, addr: u32, len: u32, perm: AccessAttr) -> Result<u32, ()> {
-        let program = unsafe {
+        let prog = unsafe {
             & *self.program
         };
-        for region in &program.regions {
-            if region.enabled() {
-                let start = region.get_virt();
-                let end = start + region.len;
-                if start <= addr && addr + len <= end && region.get_attr().unwrap().access_valid(perm) {
-                    return Ok(addr)
-                }
-            }
-        }
-        Err(())
+        check_region_access(addr, len, perm, &prog.regions)
     }
 }
 

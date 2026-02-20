@@ -1,6 +1,6 @@
-use core::{mem::MaybeUninit, ptr, slice};
+use core::{mem, ptr, slice};
 
-use crate::{messages::{Message, MessageHeader}, println, proc::{Proc, ProcState}, program::AccessAttr};
+use crate::{messages::MessageHeader, proc::{Proc, ProcState}, program::AccessAttr};
 
 pub trait MessageQueue {}
 
@@ -20,7 +20,8 @@ pub enum QueueError {
     InvalidQueue(u32),
     BufferTooLarge,
     Died,
-    InvalidMemoryAccess
+    InvalidMemoryAccess,
+    SenderInvalidMemoryAccess
 }
 
 impl From<QueueError> for u32 {
@@ -33,6 +34,7 @@ impl From<QueueError> for u32 {
             QueueError::BufferTooLarge => 4,
             QueueError::Died => 5,
             QueueError::InvalidMemoryAccess => 6,
+            QueueError::SenderInvalidMemoryAccess => 7,
         }
     }
 }
@@ -85,8 +87,8 @@ impl SyncMessageQueue {
         };
         Ok(MessageHeader { 
             pid: front.pid, 
-            tag: front.get_r1(), // r1 contains message tag 
-            len: front.get_r2() // r2 contains message length
+            tag: front.get_r1().map_err(|_| QueueError::SenderInvalidMemoryAccess)?, // r1 contains message tag 
+            len: front.get_r2().map_err(|_| QueueError::SenderInvalidMemoryAccess)? // r2 contains message length
         })
     }
 
@@ -106,28 +108,24 @@ impl SyncMessageQueue {
             }
             return Err(QueueError::Died);
         }
-        let len = front.get_r2() as usize;
-        let data = front.get_r3();
+        let len = front.get_r2().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
+        // mask out send length
+        let len = (len & 0xffff) as usize;
+        let data = front.get_r3().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
         if len > buffer.len() {
             return Err(QueueError::BufferTooSmall);
         }
-        if len > 4 {
-            // check access is valid
-            front.check_access(data, len as u32, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
-            // indirect message
-            let data = unsafe {
-                slice::from_raw_parts(ptr::with_exposed_provenance(data as usize), len)
-            };
-            buffer[..len].copy_from_slice(data);
-        } else {
-            // direct message
-            let data = data.to_be_bytes();
-            buffer[..len].copy_from_slice(&data[..len]);
-        }
+        // check access is valid
+        front.check_access(data, len as u32, AccessAttr::new(true, false, false)).map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
+        // write message
+        let data = unsafe {
+            slice::from_raw_parts(ptr::with_exposed_provenance(data as usize), len)
+        };
+        buffer[..len].copy_from_slice(data);
         Ok(len)
     }
-
-    pub fn reply(&mut self, msg: u32) -> Result<*mut Proc, QueueError> {
+    
+    pub fn reply(&mut self, msg: u32, buffer: Option<&[u8]>) -> Result<*mut Proc, QueueError> {
         if self.front.is_null() {
             return Err(QueueError::QueueEmpty);
         }
@@ -143,7 +141,29 @@ impl SyncMessageQueue {
             }
             return Err(QueueError::Died);
         }
-        front.set_r0(msg);
+        let len = front.get_r2().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
+        let data = front.get_r3().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
+        // mask out reply len
+        let len = ((len >> 16) & 0xffff) as usize;
+        let reply_len = if let Some(buffer) = buffer {
+            if buffer.len() > len {
+                return Err(QueueError::BufferTooLarge);
+            }
+            if len > 0 {
+                // check access is valid
+                front.check_access(data, len as u32, AccessAttr::new(false, true, false)).map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
+                // write reply
+                let data = unsafe {
+                    slice::from_raw_parts_mut(ptr::with_exposed_provenance_mut(data as usize), buffer.len())
+                };
+                data.copy_from_slice(buffer);
+            }
+            buffer.len() as u32
+        } else {
+            0
+        };
+        _ = front.set_r0(msg);
+        _ = front.set_r1(reply_len);
         self.front = front.next;
         if self.front.is_null() {
             self.back = ptr::null_mut();
@@ -160,7 +180,9 @@ unsafe impl Sync for SyncMessageQueue {}
 
 #[repr(C)]
 pub struct AsyncMessageQueue {
-    buffer: &'static mut [MaybeUninit<Message>],
+    buffer: *mut MessageHeader,
+    buffer_len: u32,
+    message_len: u32,
     start: u32,
     end: u32,
     len: u32,
@@ -168,9 +190,11 @@ pub struct AsyncMessageQueue {
 }
 
 impl AsyncMessageQueue {
-    pub const unsafe fn new(buffer: &'static mut [MaybeUninit<Message>]) -> Self {
+    pub const unsafe fn new(buffer: *mut MessageHeader, buffer_len: u32, message_len: u32) -> Self {
         Self {
             buffer,
+            buffer_len,
+            message_len,
             start: 0,
             end: 0,
             len: 0,
@@ -185,15 +209,32 @@ impl AsyncMessageQueue {
     }
 
     #[inline(always)]
-    pub const fn capacity(&self) -> usize {
-        self.buffer.len()
+    pub fn capacity(&self) -> usize {
+        self.buffer_len as usize
+    }
+
+    #[inline(always)]
+    fn message_size(&self) -> usize {
+        self.message_len as usize + mem::size_of::<MessageHeader>()
     }
     
-    pub fn send(&mut self, msg: Message) -> Result<(), QueueError> {
-        if (self.len as usize) < self.buffer.len() {
-            self.buffer[self.end as usize].write(msg);
+    pub fn send(&mut self, mut header: MessageHeader, data: &[u8]) -> Result<(), QueueError> {
+        header.len = data.len() as u32;
+        if header.len > self.message_len {
+            return Err(QueueError::BufferTooLarge);
+        }
+        if self.len < self.buffer_len {
+            let index = self.end as usize * self.message_size() / mem::size_of::<MessageHeader>();
+            unsafe {
+                self.buffer.add(index).write(header);
+            }
+            let body: &mut [u8] = unsafe { 
+                let addr = self.buffer.add(index).addr() + mem::size_of::<MessageHeader>();
+                slice::from_raw_parts_mut(ptr::with_exposed_provenance_mut(addr), data.len())
+            };
+            body.copy_from_slice(data);
             self.len += 1;
-            self.end = (self.end + 1) % self.buffer.len() as u32;
+            self.end = (self.end + 1) % self.buffer_len;
             Ok(())
         } else {
             Err(QueueError::QueueFull)
@@ -202,10 +243,11 @@ impl AsyncMessageQueue {
 
     pub fn read_header(&self) -> Result<MessageHeader, QueueError> {
         if self.len > 0 {
+            let index = self.start as usize * self.message_size() / mem::size_of::<MessageHeader>();
             let res = unsafe {
-                self.buffer[self.start as usize].assume_init_ref()
+                self.buffer.add(index).read()
             };
-            Ok(res.header.clone())
+            Ok(res)
         } else {
             Err(QueueError::QueueEmpty)
         }
@@ -213,19 +255,20 @@ impl AsyncMessageQueue {
 
     pub fn read_data(&mut self, buffer: &mut [u8]) -> Result<usize, QueueError> {
         if self.len > 0 {
-            let msg = unsafe {
-                self.buffer[self.start as usize].assume_init_ref()
+            let index = self.start as usize * self.message_size() / mem::size_of::<MessageHeader>();
+            let header = unsafe {
+                self.buffer.add(index).read()
             };
-            if buffer.len() < msg.header.len as usize {
+            if buffer.len() < header.len as usize {
                 Err(QueueError::BufferTooSmall)
             } else {
-                let data = msg.body;
-                let len = msg.header.len as usize;
-                buffer[..len].copy_from_slice(&data[..len]);
-                unsafe {
-                    self.buffer[self.start as usize].assume_init_drop();
-                }
-                self.start = (self.start + 1) % self.buffer.len() as u32;
+                let body: &[u8] = unsafe {
+                    let addr = self.buffer.add(index).addr() + mem::size_of::<MessageHeader>();
+                    slice::from_raw_parts(ptr::with_exposed_provenance(addr), header.len as usize)
+                };
+                buffer[..body.len()].copy_from_slice(body);
+                let len = body.len();
+                self.start = (self.start + 1) % self.buffer_len;
                 self.len -= 1;
                 Ok(len)
             }
@@ -239,31 +282,6 @@ impl MessageQueue for AsyncMessageQueue {}
 
 unsafe impl Send for AsyncMessageQueue {}
 unsafe impl Sync for AsyncMessageQueue {}
-
-
-pub struct Endpoints<QUEUE: MessageQueue + 'static> {
-    endpoints: &'static [*mut QUEUE],
-}
-
-impl<QUEUE: MessageQueue + 'static> Endpoints<QUEUE> {
-    pub const fn len(&self) -> usize {
-        self.endpoints.len()
-    }
-
-    pub const fn as_ptr(&self) -> *const *mut QUEUE {
-        self.endpoints.as_ptr()
-    }
-}
-
-unsafe impl<QUEUE: MessageQueue + 'static> Send for Endpoints<QUEUE> {}
-unsafe impl<QUEUE: MessageQueue + 'static> Sync for Endpoints<QUEUE> {}
-
-pub static mut SYNC_QUEUES1: [SyncMessageQueue; 1] = unsafe { [SyncMessageQueue::new()] };
-pub static mut SYNC_QUEUES2: [SyncMessageQueue; 1] = unsafe { [SyncMessageQueue::new()] };
-
-pub static SYNC_ENDPOINTS1: Endpoints<SyncMessageQueue> = Endpoints { endpoints: &[unsafe { (* &raw mut SYNC_QUEUES2).as_mut_ptr().add(0) }] };
-
-pub static SYNC_ENDPOINTS2: Endpoints<SyncMessageQueue> = Endpoints { endpoints: & [unsafe { (* &raw mut SYNC_QUEUES1).as_mut_ptr().add(0) }] };
 
 
 #[cfg(test)]
@@ -298,9 +316,9 @@ mod test {
         }
 
         print!("Testing send message ");
-        proc.set_r1(15);
-        proc.set_r2(4);
-        proc.set_r3(10);
+        proc.set_r1(15).unwrap();
+        proc.set_r2(4).unwrap();
+        proc.set_r3(10).unwrap();
         unsafe {
             queue.send(&raw mut proc);
         }
@@ -330,7 +348,7 @@ mod test {
         assert_eq!(proc_ptr, &raw mut proc);
         assert_eq!(queue.front, ptr::null_mut());
         assert_eq!(queue.back, ptr::null_mut());
-        assert_eq!(proc.get_r0(), 20);
+        assert_eq!(proc.get_r0().unwrap(), 20);
         println!("[ok]");
 
         print!("Testing read empty queue ");

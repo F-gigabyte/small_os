@@ -32,32 +32,88 @@
 .globl _disable_irq
 .type _disable_irq, "function"
 
+// r0 -> load start, r1 -> load end, r2 -> virt start
+_memset:
+2:
+    cmp r0, r1
+    bge 1f
+    ldr r3, [r0]
+    adds r0, #4
+    str r3, [r2]
+    adds r2, #4
+    b 2b
+1:
+    mov pc, lr
+
+// r0 -> start, r1 -> end
+_zero:
+    movs r2, #0
+2:
+    cmp r0, r1
+    bge 1f
+    str r2, [r0]
+    adds r0, #4
+    b 2b
+1:
+    mov pc, lr
 
 _start:
     // copy data into memory
     ldr r0, =__kernel_data_phys_start // Data physical address
-    ldr r2, =__kernel_data_phys_end // Data physical end address
-    ldr r1, =__kernel_data_virt_start // Data load address
-2:
-    cmp r0, r2
-    bge 1f
-    ldr r3, [r0]
-    adds r0, #4
-    str r3, [r1]
-    adds r1, #4
-    b 2b
-1:
+    ldr r1, =__kernel_data_phys_end // Data physical end address
+    ldr r2, =__kernel_data_virt_start // Data load address
+    bl _memset
+    ldr r0, =__async_queues_phys_start // Data physical address
+    ldr r1, =__async_queues_phys_end // Data physical address
+    ldr r2, =__async_queues_virt_start // Data load address
+    bl _memset
+    // 0 bss section
+    ldr r0, =__kernel_bss_virt_start // bss load address
+    ldr r1, =__kernel_bss_virt_end // bss load end address
+    bl _zero
+    // 0 sync queues
+    ldr r0, =__sync_queues_virt_start
+    ldr r1, =__sync_queues_virt_end
+    bl _zero
+    // 0 proc table
+    ldr r0, =__procs_virt_start
+    ldr r1, =__procs_virt_end
+    bl _zero
     // jump to main
     bl main
+    // halt if return
+    wfi
+    b .
 
 
 _nmi:
     mov r0, sp
+    mov r1, lr
     bl nmi
+// if return, because was a process that was terminated
+2:
+    movs r0, r0
+    bne 3f
+    wfi
+    bl do_proc_switch
+    b 2b
+3:
+    bl schedule
 
 _hard_fault:
     mov r0, sp
+    mov r1, lr
     bl hard_fault
+// if return, because was a process that was terminated
+2:
+    movs r0, r0
+    bne 3f
+    wfi
+    bl do_proc_switch
+    b 2b
+3:
+    bl schedule
+
 
 _sys_call:
     // get current process
