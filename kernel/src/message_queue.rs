@@ -1,6 +1,6 @@
 use core::{mem, ptr, slice};
 
-use crate::{messages::MessageHeader, proc::{Proc, ProcState}, program::AccessAttr};
+use crate::{messages::MessageHeader, println, proc::{Proc, ProcState, RegisterUpdate}, program::AccessAttr};
 
 pub trait MessageQueue {}
 
@@ -113,6 +113,7 @@ impl SyncMessageQueue {
         let len = (len & 0xffff) as usize;
         let data = front.get_r3().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
         if len > buffer.len() {
+            println!("Buffer too small error");
             return Err(QueueError::BufferTooSmall);
         }
         // check access is valid
@@ -141,8 +142,10 @@ impl SyncMessageQueue {
             }
             return Err(QueueError::Died);
         }
-        let len = front.get_r2().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
-        let data = front.get_r3().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
+        let (len, data) = {
+            let registers = front.get_registers().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
+            (registers.r2, registers.r3)
+        };
         // mask out reply len
         let len = ((len >> 16) & 0xffff) as usize;
         let reply_len = if let Some(buffer) = buffer {
@@ -162,8 +165,15 @@ impl SyncMessageQueue {
         } else {
             0
         };
-        _ = front.set_r0(msg);
-        _ = front.set_r1(reply_len);
+        let registers = RegisterUpdate {
+            r0: Some(msg),
+            r1: Some(reply_len),
+            r2: None,
+            r3: None,
+            r12: None,
+            lr: None
+        };
+        _ = front.set_registers(&registers);
         self.front = front.next;
         if self.front.is_null() {
             self.back = ptr::null_mut();
@@ -260,6 +270,7 @@ impl AsyncMessageQueue {
                 self.buffer.add(index).read()
             };
             if buffer.len() < header.len as usize {
+                println!("Buffer too small error");
                 Err(QueueError::BufferTooSmall)
             } else {
                 let body: &[u8] = unsafe {

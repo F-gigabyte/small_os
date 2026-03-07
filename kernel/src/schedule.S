@@ -6,6 +6,7 @@
 // r0 -> pointer to current Proc struct
 // This must be called within handler mode
 schedule:
+    bl correct_errors
     bl switch_regions
     // set r1 to process stack pointer
     ldr r1, [r0, #0x24]

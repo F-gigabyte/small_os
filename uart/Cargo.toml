@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 small_os_lib = { path = "../small_os_lib" }
-safe-mmio = "0.2.7"
+safe-mmio = "0.3.0"

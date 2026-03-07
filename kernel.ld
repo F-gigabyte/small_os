@@ -19,6 +19,10 @@ SECTIONS {
         KEEP(*(.text.vectors));
     }
 
+    .text.flash : {
+        KEEP(*(.text.flash));
+    }
+
     .text : {
         *(.text);
         *(.text.*);

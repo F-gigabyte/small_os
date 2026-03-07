@@ -1,6 +1,6 @@
-use core::{mem, ptr::{self, NonNull}};
+use core::{ptr::{self, NonNull}};
 
-use safe_mmio::{UniqueMmioPointer, field, fields::{ReadOnly, ReadPure, ReadPureWrite, WriteOnly}};
+use safe_mmio::{UniqueMmioPointer, field, fields::{ReadOnly, ReadPureWrite, WriteOnly}};
 
 use crate::{mmio::{REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS}, mutex::SpinIRQ};
 

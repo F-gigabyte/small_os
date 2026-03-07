@@ -87,45 +87,46 @@ impl Timer {
     }
 
     pub fn read_time(&mut self) -> u64 {
-        let lower = field!(self.registers, timerawl).read();
-        let upper = field!(self.registers, timerawh).read();
+        let lower = field!(self.registers, timelr).read();
+        let upper = field!(self.registers, timehr).read();
         (upper as u64) << 32 | (lower as u64)
     }
 
     #[inline(always)]
     pub fn set_count0(&mut self, count: u32) {
         // do this step so we lock the time registers in the middle
-        let lower = field!(self.registers, timerawl).read();
+        let lower = field!(self.registers, timelr).read();
         let time = lower.wrapping_add(count);
+        println!("Was {}, setting {}", lower, time);
         field!(self.registers, alarm0).write(time);
-        field!(self.registers, timerawh).read();
+        field!(self.registers, timehr).read();
     }
     
     #[inline(always)]
     pub fn set_count1(&mut self, count: u32) {
         // do this step so we lock the time registers in the middle
-        let lower = field!(self.registers, timerawl).read();
+        let lower = field!(self.registers, timelr).read();
         let time = lower.wrapping_add(count);
         field!(self.registers, alarm1).write(time);
-        field!(self.registers, timerawh).read();
+        field!(self.registers, timehr).read();
     }
     
     #[inline(always)]
     pub fn set_count2(&mut self, count: u32) {
         // do this step so we lock the time registers in the middle
-        let lower = field!(self.registers, timerawl).read();
+        let lower = field!(self.registers, timelr).read();
         let time = lower.wrapping_add(count);
         field!(self.registers, alarm2).write(time);
-        field!(self.registers, timerawh).read();
+        field!(self.registers, timehr).read();
     }
     
     #[inline(always)]
     pub fn set_count3(&mut self, count: u32) {
         // do this step so we lock the time registers in the middle
-        let lower = field!(self.registers, timerawl).read();
+        let lower = field!(self.registers, timelr).read();
         let time = lower.wrapping_add(count);
         field!(self.registers, alarm3).write(time);
-        field!(self.registers, timerawh).read();
+        field!(self.registers, timehr).read();
     }
 
     #[inline(always)]

@@ -1,11 +1,11 @@
-use core::{cell::UnsafeCell, mem, ptr, slice};
+use core::{cell::UnsafeCell, ptr, slice};
 
-use crate::{inter::CS, message_queue::QueueError, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcError, ProcState}, program::{AccessAttr, Program}};
+use crate::{inter::CS, message_queue::QueueError, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcError, ProcState, RegisterUpdate}, program::{AccessAttr, Program}};
 
 // If this is changed, must change Proc struct
 const NUM_PRIORITIES: usize = 256;
 
-pub const QUANTUM_MICROS: u32 = 1000;
+pub const QUANTUM_MICROS: u32 = 10000;
 
 pub struct Scheduler {
     // processes managed by scheduler
@@ -223,7 +223,7 @@ impl Scheduler {
                 let program = &mut *program;
                 let driver = program.driver() as usize;
                 let r0 = if driver != 0 {
-                    program.regions[0].get_virt()
+                    program.regions[0].get_runtime_addr().unwrap()
                 } else {
                     0
                 };
@@ -231,13 +231,17 @@ impl Scheduler {
                 for region in &mut program.regions {
                     if region.enabled() {
                         if region.should_zero() {
-                            let data: &mut [u8] = slice::from_raw_parts_mut(ptr::with_exposed_provenance_mut(region.get_virt() as usize), region.len as usize);
+                            let runtime_addr = region.get_runtime_addr().unwrap();
+                            let data: &mut [u8] = slice::from_raw_parts_mut(ptr::with_exposed_provenance_mut(runtime_addr as usize), region.len as usize);
                             data.fill(0);
-                        } else if region.get_virt() != region.phys_addr {
-                            let virt: &mut [u8] = slice::from_raw_parts_mut(ptr::with_exposed_provenance_mut(region.get_virt() as usize), region.len as usize);
-                            let phys: &[u8] = slice::from_raw_parts(ptr::with_exposed_provenance(region.phys_addr as usize), region.len as usize);
+                        } else if let Some(virt_addr) = region.get_virt() && let Some(phys_addr) = region.get_phys() {
+                            let len = 1 << (region.get_len() + 1);
+                            let virt: &mut [u8] = slice::from_raw_parts_mut(ptr::with_exposed_provenance_mut(virt_addr as usize), len);
+                            let phys: &[u8] = slice::from_raw_parts(ptr::with_exposed_provenance(phys_addr as usize), len);
                             virt.copy_from_slice(phys);
                         }
+                        region.encode_codes(program.block_len);
+                        region.check_crc().unwrap_or(Ok(())).expect("Have uncorrectable flash error");
                     }
                 }
                 current.init(
@@ -289,7 +293,7 @@ impl Scheduler {
         self.irq_events[irq] = ptr::null_mut();
     }
 
-    pub fn send(&mut self, endpoint: u32, len: u32, data: *mut u8) -> Result<(), QueueError> {
+    pub fn send(&mut self, endpoint: u32, tag: u32, len: u32, data: *mut u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
         };
@@ -299,8 +303,6 @@ impl Scheduler {
         if endpoint < program.num_sync_endpoints {
             // check access permissions
             current.check_access(data.addr() as u32, len, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
-            let r1 = current.get_r1().map_err(|_| QueueError::InvalidMemoryAccess)?;
-            let r2 = current.get_r2().map_err(|_| QueueError::InvalidMemoryAccess)?;
             let queue = unsafe {
                 &mut **program.sync_endpoints.add(endpoint as usize)
             };
@@ -311,13 +313,20 @@ impl Scheduler {
                 let proc = unsafe {
                     &mut *queue.blocked
                 };
+                let registers = RegisterUpdate {
+                    // pid
+                    r0: Some(current.pid),
+                    // tag
+                    r1: Some(tag),
+                    // message length
+                    r2: Some(len),
+                    // message data
+                    r3: Some(data as u32),
+                    r12: None,
+                    lr: None
+                };
                 // set blocked processes message header
-                // pid
-                _ = proc.set_r0(current.pid);
-                // tag
-                _ = proc.set_r1(r1);
-                // message length
-                _ = proc.set_r2(r2);
+                _ = proc.set_registers(&registers);
                 // wake up blocked receiver
                 unsafe {
                     self.schedule_internal(queue.blocked);
@@ -361,10 +370,19 @@ impl Scheduler {
                 let proc = unsafe {
                     &mut *queue.blocked
                 };
+                let registers = RegisterUpdate {
+                    // pid
+                    r0: Some(current.pid),
+                    // tag
+                    r1: Some(tag),
+                    // message length
+                    r2: Some(len),
+                    r3: None,
+                    r12: None,
+                    lr: None
+                };
                 // set blocked processes message header
-                _ = proc.set_r0(current.pid);
-                _ = proc.set_r1(tag);
-                _ = proc.set_r2(len);
+                _ = proc.set_registers(&registers);
                 // wake up blocked receiver
                 unsafe {
                     self.schedule_internal(queue.blocked);
@@ -390,9 +408,15 @@ impl Scheduler {
             };
             match queue.read_header() {
                 Ok(header) => {
-                    _ = current.set_r0(header.pid);
-                    _ = current.set_r1(header.tag);
-                    _ = current.set_r2(header.len);
+                    let registers = RegisterUpdate {
+                        r0: Some(header.pid),
+                        r1: Some(header.tag),
+                        r2: Some(header.len),
+                        r3: None,
+                        r12: None,
+                        lr: None
+                    };
+                    _ = current.set_registers(&registers);
                     Ok(())
                 },
                 Err(err) => {
@@ -425,9 +449,15 @@ impl Scheduler {
             };
             match queue.read_header() {
                 Ok(header) => {
-                    _ = current.set_r0(header.pid);
-                    _ = current.set_r1(header.tag);
-                    _ = current.set_r2(header.len);
+                    let registers = RegisterUpdate {
+                        r0: Some(header.pid),
+                        r1: Some(header.tag),
+                        r2: Some(header.len),
+                        r3: None,
+                        r12: None,
+                        lr: None
+                    };
+                    _ = current.set_registers(&registers);
                     Ok(())
                 },
                 Err(err) => {
@@ -531,6 +561,15 @@ impl Scheduler {
         self.current
     }
 
+    pub fn update_current_codes(&mut self) {
+        if !self.current.is_null() {
+            let current = unsafe {
+                &mut *self.current
+            };
+            current.update_codes();
+        }
+    }
+
     pub fn kill(&mut self, pid: u32) -> Result<(), ProcError> {
         if (pid as usize) >= self.processes.len() {
             return Err(ProcError::InvalidPID(pid));
@@ -592,6 +631,24 @@ pub unsafe fn get_current_proc() -> *mut Proc {
         CS::new()
     };
     scheduler(&cs).get_current()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe fn correct_errors(proc: *mut Proc) -> *mut Proc {
+    let proc = unsafe {
+        &mut *proc
+    };
+    proc.correct_errors().expect("Unable to correct process errors");
+    proc
+}
+
+#[unsafe(no_mangle)]
+pub unsafe fn update_codes(proc: *mut Proc) -> *mut Proc {
+    let proc = unsafe {
+        &mut *proc
+    };
+    proc.update_codes();
+    proc
 }
 
 #[cfg(test)]

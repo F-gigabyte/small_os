@@ -67,6 +67,10 @@ _start:
     ldr r1, =__async_queues_phys_end // Data physical address
     ldr r2, =__async_queues_virt_start // Data load address
     bl _memset
+    ldr r0, =__kernel_text_flash_phys_start // Data physical address
+    ldr r1, =__kernel_text_flash_phys_end // Data physical address
+    ldr r2, =__kernel_text_flash_virt_start // Data load address
+    bl _memset
     // 0 bss section
     ldr r0, =__kernel_bss_virt_start // bss load address
     ldr r1, =__kernel_bss_virt_end // bss load end address
@@ -84,7 +88,6 @@ _start:
     // halt if return
     wfi
     b .
-
 
 _nmi:
     mov r0, sp
@@ -121,6 +124,8 @@ _sys_call:
     // check if currently running a process and if so, save the state
     movs r0, r0
     beq 3f // if not running a process, the sys call is invalid
+    // save current process codes
+    bl update_codes
     // store unsaved process registers (r4 to r11)
     stm r0!, {r4-r7}
     mov r4, r8
@@ -132,6 +137,7 @@ _sys_call:
     mrs r1, psp
     // save stack pointer
     str r1, [r0]
+    mov r7, r1
     // first argument stack
     mov r0, r1
     bl sys_call
@@ -151,6 +157,8 @@ _sys_pend:
     // check if currently running a process and if so, save the state
     movs r0, r0
     beq 1f
+    // save current process codes
+    bl update_codes
     // store unsaved process registers (r4 to r11)
     stm r0!, {r4-r7}
     mov r4, r8
@@ -249,17 +257,19 @@ _proc_switch:
     // check if currently running a process and if so, save the state
     movs r0, r0
     beq 1f
+    mov r2, r0
     // store unsaved process registers (r4 to r11)
-    stm r0!, {r4-r7}
+    stm r2!, {r4-r7}
     mov r4, r8
     mov r5, r9
     mov r6, r10
     mov r7, r11
-    stm r0!, {r4-r7}
-    adds r0, #4 // increment after pid
+    stm r2!, {r4-r7}
     mrs r1, psp
     // save stack pointer
-    str r1, [r0]
+    str r1, [r2, #4]
+    // save current process codes
+    bl update_codes
 1:
     bl timer0
     // if got null pointer (no process) wait for an interrupt and try again

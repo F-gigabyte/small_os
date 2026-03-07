@@ -4,7 +4,7 @@
 #![no_std]
 #![no_main]
 
-use core::{arch::asm, fmt::{self, Write}, intrinsics::abort, panic::PanicInfo};
+use core::{arch::asm, fmt::{self, Write}, intrinsics::abort, panic::PanicInfo, ptr};
 
 use small_os_lib::send_empty;
 

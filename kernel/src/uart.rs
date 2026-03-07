@@ -1,4 +1,4 @@
-use core::{fmt::Write, ptr::{self, NonNull}, sync::atomic::{Ordering, compiler_fence}};
+use core::{fmt::Write, ptr::{self, NonNull}};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, ReadWrite, WriteOnly}};
 

@@ -10,9 +10,12 @@
 #![no_main]
 #![reexport_test_harness_main = "test_main"]
 
-use core::{intrinsics::abort, panic::PanicInfo};
+use core::{panic::PanicInfo, ptr, slice};
 
-use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, mutex::force_spinlock_unlock, nvic::{NVIC, irqs}, pll::PLL, program::init_processes, reset::RESET, rosc::ROSC, system::SYSTEM, timer::{TIMER, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
+use crc32::calc_crc;
+use hamming::calc_symbols;
+
+use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, mpu::MPU, mutex::{SpinIRQGuard, force_spinlock_unlock}, nvic::{NVIC, irqs}, pll::PLL, program::init_processes, reset::RESET, rosc::ROSC, system::SYSTEM, timer::{TIMER, Timer, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
 
 pub mod uart;
 pub mod reset;
@@ -31,13 +34,54 @@ pub mod watchdog;
 pub mod pll;
 pub mod proc;
 pub mod scheduler;
-pub mod test_proc;
 pub mod sys_tick;
 pub mod system;
 pub mod messages;
 pub mod message_queue;
 pub mod program;
 pub mod mpu;
+
+fn time_hamming<'a, 'b>(timer: &mut SpinIRQGuard<'a, 'b, Timer>, addr: usize) {
+    let start = addr;
+    let end = addr + 247 * 4;
+    let start_time = timer.read_time();
+    let data = unsafe {
+        slice::from_raw_parts(ptr::with_exposed_provenance(addr), 247)
+    };
+    let mut symbols = [0; 9];
+    calc_symbols(&mut symbols, data);
+    let end_time = timer.read_time();
+    let time = end_time.wrapping_sub(start_time);
+    println!("0x{:x} -> 0x{:x} in {}us with codes {:?}", start, end, time, symbols);
+}
+
+fn time_crc<'a, 'b>(timer: &mut SpinIRQGuard<'a, 'b, Timer>, addr: usize) {
+    let start = addr;
+    let end = addr + 247 * 4;
+    let start_time = timer.read_time();
+    let data = unsafe {
+        slice::from_raw_parts(ptr::with_exposed_provenance(addr), 247 * 4)
+    };
+    let crc = calc_crc(data);
+    let end_time = timer.read_time();
+    let time = end_time.wrapping_sub(start_time);
+    println!("0x{:x} -> 0x{:x} in {}us with crc {:?}", start, end, time, crc);
+}
+
+fn time_mem_read<'a, 'b>(timer: &mut SpinIRQGuard<'a, 'b, Timer>, start: usize, end: usize) {
+    let start_time = timer.read_time();
+    let len = (end - start) / 4;
+    let mut ptr: *const u32 = ptr::with_exposed_provenance(start);
+    for _ in 0..len {
+        unsafe {
+            _ = ptr.read_volatile();
+            ptr = ptr.add(1);
+        }
+    }
+    let end_time = timer.read_time();
+    let time = end_time.wrapping_sub(start_time);
+    println!("0x{:x} -> 0x{:x} in {}us", start, end, time);
+}
 
 unsafe extern "C" {
     static __stack: u8;
@@ -48,7 +92,7 @@ unsafe extern "C" {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("{}", info);
-    abort()
+    loop {}
 }
 
 /// An example test to check tests are working
@@ -126,6 +170,9 @@ pub extern "C" fn main() -> ! {
         timer.remove_debug_pause();
         let mut nvic = NVIC.lock(&cs);
         nvic.enable_irq(irqs::TIMER0);
+        let mut mpu = MPU.lock(&cs);
+        mpu.init();
+        time_crc(&mut timer, 0x20000000);
         {
             unsafe {
                 init_processes(&cs);

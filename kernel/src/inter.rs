@@ -304,12 +304,12 @@ fn do_sys_call(sys_call: SysCall, stack: &mut StackTrace, cs: &CS) -> Result<(),
         // send message
         SysCall::Send { 
             endpoint,  
-            tag: _,
+            tag,
             len,
             data
         } => {
             let mut scheduler = scheduler(cs);
-            scheduler.send(endpoint, len, data).map_err(|err| u32::from(err))
+            scheduler.send(endpoint, tag, len, data).map_err(|err| u32::from(err))
         },
         SysCall::SendAsync { 
             endpoint, 
@@ -405,6 +405,8 @@ pub extern "C" fn sys_call(stack: *mut StackTrace) -> *mut Proc {
         }
     }
     let mut scheduler = scheduler(&cs);
+    scheduler.update_current_codes();
+
     // only switch out if current is blocked or its time slice expired
     scheduler.next_current_process();
     scheduler.get_current()

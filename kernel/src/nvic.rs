@@ -1,6 +1,6 @@
 use core::ptr::{self, NonNull};
 
-use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite}};
+use safe_mmio::{UniqueMmioPointer, field, fields::ReadPureWrite};
 
 use crate::mutex::IRQMutex;
 

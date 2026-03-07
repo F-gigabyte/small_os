@@ -2,7 +2,7 @@ use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite}};
 
-use crate::{inter::CS, mmio::{REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS}, mutex::IRQMutex, proc::Proc, program::Region};
+use crate::{inter::CS, mutex::IRQMutex, proc::Proc, program::Region};
 
 
 struct MPURegisters {
@@ -63,8 +63,8 @@ mod attr_size_register {
     pub const ATTR_BUFFERABLE_SHIFT: usize = ATTR_SHIFT + 0;
     pub const ATTR_CACHABLE_SHIFT: usize = ATTR_SHIFT + 1;
     pub const ATTR_SHAREABLE_SHIFT: usize = ATTR_SHIFT + 2;
-    pub const ATTR_AP_SHIFT: usize = ATTR_SHIFT + 3;
-    pub const ATTR_XN_SHIFT: usize = ATTR_SHIFT + 6;
+    pub const ATTR_AP_SHIFT: usize = ATTR_SHIFT + 8;
+    pub const ATTR_XN_SHIFT: usize = ATTR_SHIFT + 12;
 
     pub const ENABLE_MASK: u32 = 1 << ENABLE_SHIFT;
     pub const SIZE_MASK: u32 = 0xf << SIZE_SHIFT;
@@ -87,8 +87,6 @@ mod attr_size_register {
 
 pub struct MPU {
     reg: UniqueMmioPointer<'static, MPURegisters>,
-    clear_reg: UniqueMmioPointer<'static, MPURegisters>,
-    set_reg: UniqueMmioPointer<'static, MPURegisters>
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -125,15 +123,13 @@ impl MPU {
         unsafe {
             Self {
                 reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base)).unwrap()),
-                clear_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_CLR_BITS)).unwrap()),
-                set_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_SET_BITS)).unwrap())
             }
         }
     }
 
     pub fn init(&mut self) {
         self.unmap_regions();
-        field!(self.set_reg, ctrl).write(ctrl_register::ENABLE_MASK | ctrl_register::DEFAULT_MAP_MASK | ctrl_register::HF_NMI_ENABLE_MASK);
+        field!(self.reg, ctrl).write(ctrl_register::ENABLE_MASK | ctrl_register::DEFAULT_MAP_MASK | ctrl_register::HF_NMI_ENABLE_MASK);
     }
 
     fn set_region_base(&mut self, base: u32, region: MPURegion) {
@@ -143,12 +139,7 @@ impl MPU {
 
     pub fn unmap_region(&mut self, region: MPURegion) {
         self.set_region_base(0, region);
-        field!(self.clear_reg, attr_size).write(
-            attr_size_register::ENABLE_MASK |
-            attr_size_register::ATTR_MASK |
-            attr_size_register::SIZE_MASK |
-            attr_size_register::SUBREGION_DISABLE_MASK
-        );
+        field!(self.reg, attr_size).write(0);
     }
 
     pub fn unmap_regions(&mut self) {
@@ -167,19 +158,17 @@ impl MPU {
             self.unmap_region(num);
             return Ok(());
         }
-        let addr = region.get_virt() & !0xff;
-        let size = region.len;
-        if !size.is_power_of_two() {
-            return Err(());
-        }
-        // check have correct alignment and size
-        if !addr.is_multiple_of(size) {
-            return Err(());
-        }
-        let size = size.ilog2() << attr_size_register::SIZE_SHIFT;
+        let addr = region.get_runtime_addr().unwrap() & !0xff;
+        let size = region.get_len() as u32;
         if size < attr_size_register::SIZE_MIN || size > attr_size_register::SIZE_MAX {
             return Err(());
         }
+        let actual_size = 1 << (size + 1);
+        // check have correct alignment and size
+        if !addr.is_multiple_of(actual_size) {
+            return Err(());
+        }
+        let size = (size as u32) << attr_size_register::SIZE_SHIFT;
         let mut attr = if region.is_device() {
             attr_size_register::ATTR_SHAREABLE_MASK |
             attr_size_register::ATTR_BUFFERABLE_MASK
@@ -197,13 +186,7 @@ impl MPU {
             attr |= attr_size_register::ATTR_AP_R;
         }
         self.set_region_base(addr, num);
-        field!(self.clear_reg, attr_size).write(
-            attr_size_register::ENABLE_MASK |
-            attr_size_register::ATTR_MASK |
-            attr_size_register::SIZE_MASK |
-            attr_size_register::SUBREGION_DISABLE_MASK
-        );
-        field!(self.set_reg, attr_size).write(
+        field!(self.reg, attr_size).write(
             attr_size_register::ENABLE_MASK |
             attr |
             size

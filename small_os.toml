@@ -14,6 +14,7 @@ num_sync_queues = 0
 async_queues = []
 sync_endpoints = [{ name = "uart", queue = 0 }]
 async_endpoints = []
+block_len = 247
 
 [[programs]]
 name = "uart"
@@ -25,3 +26,4 @@ num_sync_queues = 1
 async_queues = []
 sync_endpoints = []
 async_endpoints = []
+block_len = 247
