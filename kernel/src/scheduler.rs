@@ -1,11 +1,11 @@
 use core::{cell::UnsafeCell, ptr, slice};
 
-use crate::{inter::CS, message_queue::QueueError, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcError, ProcState, RegisterUpdate}, program::{AccessAttr, Program}};
+use crate::{inter::CS, message_queue::QueueError, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcError, ProcState}, program::{AccessAttr, Program}};
 
 // If this is changed, must change Proc struct
 const NUM_PRIORITIES: usize = 256;
 
-pub const QUANTUM_MICROS: u32 = 10000;
+pub const QUANTUM_MICROS: u32 = 100000;
 
 pub struct Scheduler {
     // processes managed by scheduler
@@ -313,20 +313,12 @@ impl Scheduler {
                 let proc = unsafe {
                     &mut *queue.blocked
                 };
-                let registers = RegisterUpdate {
-                    // pid
-                    r0: Some(current.pid),
-                    // tag
-                    r1: Some(tag),
-                    // message length
-                    r2: Some(len),
-                    // message data
-                    r3: Some(data as u32),
-                    r12: None,
-                    lr: None
-                };
-                // set blocked processes message header
-                _ = proc.set_registers(&registers);
+                // pid
+                _ = proc.set_r0(current.pid);
+                // tag
+                _ = proc.set_r1(tag);
+                // message length
+                _ = proc.set_r2(len);
                 // wake up blocked receiver
                 unsafe {
                     self.schedule_internal(queue.blocked);
@@ -370,19 +362,13 @@ impl Scheduler {
                 let proc = unsafe {
                     &mut *queue.blocked
                 };
-                let registers = RegisterUpdate {
-                    // pid
-                    r0: Some(current.pid),
-                    // tag
-                    r1: Some(tag),
-                    // message length
-                    r2: Some(len),
-                    r3: None,
-                    r12: None,
-                    lr: None
-                };
                 // set blocked processes message header
-                _ = proc.set_registers(&registers);
+                // pid
+                _ = proc.set_r0(current.pid);
+                // tag
+                _ = proc.set_r1(tag);
+                // message length
+                _ = proc.set_r2(len);
                 // wake up blocked receiver
                 unsafe {
                     self.schedule_internal(queue.blocked);
@@ -408,15 +394,9 @@ impl Scheduler {
             };
             match queue.read_header() {
                 Ok(header) => {
-                    let registers = RegisterUpdate {
-                        r0: Some(header.pid),
-                        r1: Some(header.tag),
-                        r2: Some(header.len),
-                        r3: None,
-                        r12: None,
-                        lr: None
-                    };
-                    _ = current.set_registers(&registers);
+                    _ = current.set_r0(header.pid);
+                    _ = current.set_r1(header.tag);
+                    _ = current.set_r2(header.len);
                     Ok(())
                 },
                 Err(err) => {
@@ -449,15 +429,9 @@ impl Scheduler {
             };
             match queue.read_header() {
                 Ok(header) => {
-                    let registers = RegisterUpdate {
-                        r0: Some(header.pid),
-                        r1: Some(header.tag),
-                        r2: Some(header.len),
-                        r3: None,
-                        r12: None,
-                        lr: None
-                    };
-                    _ = current.set_registers(&registers);
+                    _ = current.set_r0(header.pid);
+                    _ = current.set_r1(header.tag);
+                    _ = current.set_r2(header.len);
                     Ok(())
                 },
                 Err(err) => {
@@ -490,12 +464,11 @@ impl Scheduler {
             let queue = unsafe {
                 &mut *program.sync_queues.add(queue as usize)
             };
+            let data = queue.read_data(len as usize)?;
+            let len = data.len();
             // check access is valid
-            current.check_access(buffer as u32, len, AccessAttr::new(false, true, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
-            let buffer = unsafe {
-                slice::from_raw_parts_mut(buffer, len as usize)
-            };
-            _ = current.set_r0(queue.read_data(buffer)? as u32);
+            current.write_bytes(buffer as u32, data).map_err(|_| QueueError::InvalidMemoryAccess)?;
+            _ = current.set_r0(len as u32);
             Ok(())
         } else {
             Err(QueueError::InvalidQueue(queue))
@@ -515,12 +488,10 @@ impl Scheduler {
             let queue = unsafe {
                 &mut *program.async_queues.add(queue as usize)
             };
-            // check access is valid
-            current.check_access(buffer as u32, len, AccessAttr::new(false, true, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
-            let buffer = unsafe {
-                slice::from_raw_parts_mut(buffer, len as usize)
-            };
-            _ = current.set_r0(queue.read_data(buffer)? as u32);
+            let data = queue.read_data(len as usize)?;
+            let len = data.len();
+            current.write_bytes(buffer as u32, data).map_err(|_| QueueError::InvalidMemoryAccess)?;
+            _ = current.set_r0(len as u32);
             Ok(())
         } else {
             Err(QueueError::InvalidQueue(queue))
@@ -539,10 +510,7 @@ impl Scheduler {
                 &mut *program.sync_queues.add(queue as usize)
             };
             let buffer = if len > 0 {
-                current.check_access(buffer.addr() as u32, len, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
-                unsafe {
-                    Some(slice::from_raw_parts(buffer, len as usize))
-                }
+                Some(current.read_bytes(buffer as u32, len as usize).map_err(|_| QueueError::InvalidMemoryAccess)?)
             } else {
                 None
             };

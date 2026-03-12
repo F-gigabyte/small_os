@@ -2,7 +2,7 @@ use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPureWrite, ReadWrite}};
 
-use crate::mutex::IRQMutex;
+use crate::{inter::CS, mutex::IRQMutex, println};
 
 #[repr(C)]
 struct SysTickRegisters {
@@ -62,9 +62,45 @@ impl SysTick {
         }
     }
 
-    /// We don't use the SysTick timer
-    pub fn disable(&mut self) {
-        field!(self.registers, ctrl_status).write(0);
+    #[inline(always)]
+    pub fn init(&mut self) {
+        field!(self.registers, ctrl_status).write(ctrl_status_register::TICKINT_MASK | ctrl_status_register::CLOCK_SRC_PROCESSOR);
+    }
+
+    #[inline(always)]
+    pub fn clear_count_flag(&mut self) {
+        field!(self.registers, ctrl_status).read();
+    }
+
+    #[inline(always)]
+    pub fn set_timeout(&mut self, time: u32) {
+        let time = (time << reload_value_register::RELOAD_SHIFT) & reload_value_register::RELOAD_MASK;
+        field!(self.registers, reload_value).write(time);
+        self.reload();
+    }
+
+    #[inline(always)]
+    pub fn start(&mut self) {
+        let mut ctrl = field!(self.registers, ctrl_status).read();
+        ctrl |= ctrl_status_register::ENABLE_MASK;
+        field!(self.registers, ctrl_status).write(ctrl);
+    }
+
+    #[inline(always)]
+    pub fn pause(&mut self) {
+        let mut ctrl = field!(self.registers, ctrl_status).read();
+        ctrl &= !ctrl_status_register::ENABLE_MASK;
+        field!(self.registers, ctrl_status).write(ctrl);
+    }
+
+    #[inline(always)]
+    pub fn reload(&mut self) {
+        field!(self.registers, current_value).write(0);
+    }
+
+    #[inline(always)]
+    pub fn read_current(&mut self) -> u32 {
+        (field!(self.registers, current_value).read() & current_value_register::CURRENT_MASK) >> current_value_register::CURRENT_SHIFT
     }
 }
 
@@ -76,3 +112,31 @@ static SYS_TICK_BASE: usize = 0xe000e010;
 pub static SYS_TICK: IRQMutex<SysTick> = unsafe {
     IRQMutex::new(SysTick::new(SYS_TICK_BASE))
 };
+
+#[unsafe(no_mangle)]
+pub unsafe fn start_sys_tick() {
+    let cs = unsafe {
+        CS::new()
+    };
+    let mut sys_tick = SYS_TICK.lock(&cs);
+    sys_tick.start();
+}
+
+#[unsafe(no_mangle)]
+pub unsafe fn reload_start_sys_tick() {
+    let cs = unsafe {
+        CS::new()
+    };
+    let mut sys_tick = SYS_TICK.lock(&cs);
+    sys_tick.reload();
+    sys_tick.start();
+}
+
+#[unsafe(no_mangle)]
+pub unsafe fn pause_sys_tick() {
+    let cs = unsafe {
+        CS::new()
+    };
+    let mut sys_tick = SYS_TICK.lock(&cs);
+    sys_tick.pause();
+}

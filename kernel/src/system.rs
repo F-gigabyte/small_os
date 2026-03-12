@@ -15,7 +15,7 @@ struct SystemRegisters {
     _reserved0: u32,
     sys_handler_priority2: ReadPureWrite<u32>,
     sys_handler_priority3: ReadPureWrite<u32>,
-    sys_handler_ctrl_state: ReadPureWrite<u32>
+    sys_handler_ctrl_state: ReadPureWrite<u32>,
 }
 
 mod cpuid_register {

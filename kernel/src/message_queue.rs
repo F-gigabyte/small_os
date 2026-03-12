@@ -1,6 +1,6 @@
 use core::{mem, ptr, slice};
 
-use crate::{messages::MessageHeader, println, proc::{Proc, ProcState, RegisterUpdate}, program::AccessAttr};
+use crate::{messages::MessageHeader, proc::{Proc, ProcState}};
 
 pub trait MessageQueue {}
 
@@ -92,7 +92,7 @@ impl SyncMessageQueue {
         })
     }
 
-    pub fn read_data(&mut self, buffer: &mut [u8]) -> Result<usize, QueueError> {
+    pub fn read_data(&mut self, buffer_len: usize) -> Result<&[u8], QueueError> {
         if self.front.is_null() {
             return Err(QueueError::QueueEmpty);
         }
@@ -112,18 +112,12 @@ impl SyncMessageQueue {
         // mask out send length
         let len = (len & 0xffff) as usize;
         let data = front.get_r3().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
-        if len > buffer.len() {
-            println!("Buffer too small error");
+        if len > buffer_len {
             return Err(QueueError::BufferTooSmall);
         }
         // check access is valid
-        front.check_access(data, len as u32, AccessAttr::new(true, false, false)).map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
         // write message
-        let data = unsafe {
-            slice::from_raw_parts(ptr::with_exposed_provenance(data as usize), len)
-        };
-        buffer[..len].copy_from_slice(data);
-        Ok(len)
+        front.read_bytes(data, buffer_len).map_err(|_| QueueError::SenderInvalidMemoryAccess)
     }
     
     pub fn reply(&mut self, msg: u32, buffer: Option<&[u8]>) -> Result<*mut Proc, QueueError> {
@@ -143,8 +137,9 @@ impl SyncMessageQueue {
             return Err(QueueError::Died);
         }
         let (len, data) = {
-            let registers = front.get_registers().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
-            (registers.r2, registers.r3)
+            let len = front.get_r2().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
+            let data = front.get_r3().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
+            (len, data)
         };
         // mask out reply len
         let len = ((len >> 16) & 0xffff) as usize;
@@ -154,26 +149,15 @@ impl SyncMessageQueue {
             }
             if len > 0 {
                 // check access is valid
-                front.check_access(data, len as u32, AccessAttr::new(false, true, false)).map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
                 // write reply
-                let data = unsafe {
-                    slice::from_raw_parts_mut(ptr::with_exposed_provenance_mut(data as usize), buffer.len())
-                };
-                data.copy_from_slice(buffer);
+                front.write_bytes(data, buffer).map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
             }
             buffer.len() as u32
         } else {
             0
         };
-        let registers = RegisterUpdate {
-            r0: Some(msg),
-            r1: Some(reply_len),
-            r2: None,
-            r3: None,
-            r12: None,
-            lr: None
-        };
-        _ = front.set_registers(&registers);
+        _ = front.set_r0(msg);
+        _ = front.set_r1(reply_len);
         self.front = front.next;
         if self.front.is_null() {
             self.back = ptr::null_mut();
@@ -263,25 +247,22 @@ impl AsyncMessageQueue {
         }
     }
 
-    pub fn read_data(&mut self, buffer: &mut [u8]) -> Result<usize, QueueError> {
+    pub fn read_data(&mut self, buffer_len: usize) -> Result<&[u8], QueueError> {
         if self.len > 0 {
             let index = self.start as usize * self.message_size() / mem::size_of::<MessageHeader>();
             let header = unsafe {
                 self.buffer.add(index).read()
             };
-            if buffer.len() < header.len as usize {
-                println!("Buffer too small error");
+            if buffer_len < header.len as usize {
                 Err(QueueError::BufferTooSmall)
             } else {
                 let body: &[u8] = unsafe {
                     let addr = self.buffer.add(index).addr() + mem::size_of::<MessageHeader>();
                     slice::from_raw_parts(ptr::with_exposed_provenance(addr), header.len as usize)
                 };
-                buffer[..body.len()].copy_from_slice(body);
-                let len = body.len();
                 self.start = (self.start + 1) % self.buffer_len;
                 self.len -= 1;
-                Ok(len)
+                Ok(body)
             }
         } else {
             Err(QueueError::QueueEmpty)

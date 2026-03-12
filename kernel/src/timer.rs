@@ -97,7 +97,6 @@ impl Timer {
         // do this step so we lock the time registers in the middle
         let lower = field!(self.registers, timelr).read();
         let time = lower.wrapping_add(count);
-        println!("Was {}, setting {}", lower, time);
         field!(self.registers, alarm0).write(time);
         field!(self.registers, timehr).read();
     }

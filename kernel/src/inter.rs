@@ -180,7 +180,7 @@ const PROC_MASK: u32 = 0x8;
 #[unsafe(no_mangle)]
 pub extern "C" fn nmi(trace: *mut StackTrace, lr: u32) -> *mut Proc {
     if lr & PROC_MASK != 0 {
-        // recoverable hard fault in application
+        // recoverable non-maskable interrupt in application
         let cs = unsafe {
             CS::new()
         };
@@ -188,12 +188,14 @@ pub extern "C" fn nmi(trace: *mut StackTrace, lr: u32) -> *mut Proc {
         let mut scheduler = scheduler(&cs);
         scheduler.reset_current();
         scheduler.next_process();
+        let mut sys_tick = SYS_TICK.lock(&cs);
+        sys_tick.reload();
         scheduler.get_current()
     } else {
         let trace = unsafe {
             &*trace
         };
-        println!("Hard Fault!");
+        println!("Non Maskable Interrupt!");
         println!("Registers");
         println!("\tr0: {:x}", trace.r0);
         println!("\tr1: {:x}", trace.r1);
@@ -210,6 +212,7 @@ pub extern "C" fn nmi(trace: *mut StackTrace, lr: u32) -> *mut Proc {
 #[unsafe(no_mangle)]
 pub extern "C" fn hard_fault(trace: *mut StackTrace, lr: u32) -> *mut Proc {
     if lr & PROC_MASK != 0 {
+        println!("Recoverable hard fault");
         // recoverable hard fault in application
         let cs = unsafe {
             CS::new()
@@ -218,6 +221,8 @@ pub extern "C" fn hard_fault(trace: *mut StackTrace, lr: u32) -> *mut Proc {
         let mut scheduler = scheduler(&cs);
         scheduler.reset_current();
         scheduler.next_process();
+        let mut sys_tick = SYS_TICK.lock(&cs);
+        sys_tick.reload();
         scheduler.get_current()
     } else {
         let trace = unsafe {
@@ -261,12 +266,9 @@ fn do_sys_call(sys_call: SysCall, stack: &mut StackTrace, cs: &CS) -> Result<(),
             len 
         } => {
             let current = unsafe {
-                & *scheduler(cs).get_current()
+                &mut *scheduler(cs).get_current()
             };
-            current.check_access(data as u32, len, AccessAttr::new(true, false, false)).map_err(|_| 1u32)?;
-            let text: &[u8] = unsafe {
-                & *ptr::slice_from_raw_parts(data, len as usize)
-            };
+            let text = current.read_bytes(data as u32, len as usize).map_err(|_| 1u32)?;
             if let Ok(text) = str::from_utf8(text) {
                 println!("{}", text);
                 stack.r0 = text.len() as u32;
@@ -386,22 +388,35 @@ pub extern "C" fn sys_call(stack: *mut StackTrace) -> *mut Proc {
     let cs = unsafe {
         CS::new()
     };
+    let prev = {
+        let mut scheduler = scheduler(&cs);
+        scheduler.get_current()
+    };
     match SysCall::try_from(&*stack) {
         Ok(sys_call) => {
             match do_sys_call(sys_call, stack, &cs) {
                 Ok(_) => {
                     // success
-                    stack.r12 = 0;
+                    let prev = unsafe {
+                        &mut *prev
+                    };
+                    _ = prev.set_r12(0);
                 },
                 Err(err) => {
                     // failure
-                    stack.r12 = err + 2;
+                    let prev = unsafe {
+                        &mut *prev
+                    };
+                    _ = prev.set_r12(err + 2);
                 }
             }
         },
         Err(_) => {
             // unknown sys call
-            stack.r12 = 1;
+            let prev = unsafe {
+                &mut *prev
+            };
+            _ = prev.set_r12(1);
         }
     }
     let mut scheduler = scheduler(&cs);
@@ -409,7 +424,13 @@ pub extern "C" fn sys_call(stack: *mut StackTrace) -> *mut Proc {
 
     // only switch out if current is blocked or its time slice expired
     scheduler.next_current_process();
-    scheduler.get_current()
+    let current = scheduler.get_current();
+    // only reset time quantum if current process has switched
+    if prev != current {
+        let mut sys_tick = SYS_TICK.lock(&cs);
+        sys_tick.reload();
+    }
+    current
 }
 
 #[unsafe(no_mangle)]
@@ -422,18 +443,6 @@ pub extern "C" fn pend_sv() -> *mut Proc {
         sys.clear_irq(SysIRQ::PendSV);
     }
     proc_switch(cs)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sys_tick() {
-    let cs = unsafe {
-        CS::new()
-    };
-    // Sys Tick shouldn't be enabled
-    let mut sys_tick = SYS_TICK.lock(&cs);
-    sys_tick.disable();
-    let mut sys = SYSTEM.lock(&cs);
-    sys.clear_irq(SysIRQ::SysTick);
 }
 
 /// performs a process switch and gets the next process
@@ -457,21 +466,22 @@ fn proc_switch(cs: CS) -> *mut Proc {
             get_current_proc()
         };
     }
-    let mut timer = TIMER.lock(&cs);
-    timer.set_count0(QUANTUM_MICROS);
     current
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn timer0() -> *mut Proc {
+pub unsafe extern "C" fn sys_tick() -> *mut Proc {
     // SAFETY
     // In interrupt handler so interrupts are disabled
     let cs = unsafe {
         CS::new()
     };
     {
-        let mut timer = TIMER.lock(&cs);
-        timer.clear_irq(TimerIRQ::Timer0);
+        let mut sys_tick = SYS_TICK.lock(&cs);
+        sys_tick.clear_count_flag();
+        sys_tick.reload();
+        let mut sys = SYSTEM.lock(&cs);
+        sys.clear_irq(SysIRQ::SysTick);
     }
     proc_switch(cs)
 }

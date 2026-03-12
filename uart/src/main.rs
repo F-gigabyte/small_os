@@ -210,14 +210,6 @@ struct UART {
     tx_enabled: bool
 }
 
-fn wait_cycles(cycles: usize) {
-    for _ in 0..cycles {
-        unsafe {
-            asm!("nop");
-        }
-    }
-}
-
 impl UART {
     const SLOTS: usize = 32;
 
@@ -247,7 +239,6 @@ impl UART {
         // enable UART, RX and TX section
         field!(res.registers, ctrl).write(ctrl_register::TXE_MASK | ctrl_register::RXE_MASK | ctrl_register::UARTEN_MASK);
         // in release builds, if this is not there garbage is printed to the screen
-        wait_cycles(1000);
         res
     }
 

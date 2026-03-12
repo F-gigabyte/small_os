@@ -90,8 +90,12 @@ _start:
     b .
 
 _nmi:
+    // save lr
+    push {lr}
+    // pause sys tick
+    bl pause_sys_tick
+    pop {r1}
     mov r0, sp
-    mov r1, lr
     bl nmi
 // if return, because was a process that was terminated
 2:
@@ -104,8 +108,12 @@ _nmi:
     bl schedule
 
 _hard_fault:
+    // save lr
+    push {lr}
+    // pause sys tick
+    bl pause_sys_tick
+    pop {r1}
     mov r0, sp
-    mov r1, lr
     bl hard_fault
 // if return, because was a process that was terminated
 2:
@@ -119,6 +127,8 @@ _hard_fault:
 
 
 _sys_call:
+    // pause sys tick
+    bl pause_sys_tick
     // get current process
     bl get_current_proc
     // check if currently running a process and if so, save the state
@@ -152,6 +162,8 @@ _sys_call:
     bl schedule
 
 _sys_pend:
+    // pause system tick
+    bl pause_sys_tick
     // get current process
     bl get_current_proc
     // check if currently running a process and if so, save the state
@@ -181,27 +193,6 @@ _sys_pend:
     b 2b
 3:
     bl schedule
-
-_sys_tick:
-    // get last 4 bits of lr (will be 1, 9 or d and be used to return to correct privileges after)
-    movs r1, #0xf
-    mov r0, lr
-    ands r1, r0
-    // get privileged bit and add into r0
-    mrs r0, control
-    movs r2, #1
-    ands r0, r2
-    lsls r0, #1
-    orrs r1, r0
-    push {r1}
-    // get interrupt number
-    mrs r0, ipsr
-    movs r3, #0x1f
-    ands r0, r3
-    subs r0, #16
-    bl sys_tick
-    pop {r0}
-    b exit_exception
 
 // r0:
 // bit pattern of
@@ -242,21 +233,27 @@ _irq_entry:
     lsls r0, #1
     orrs r1, r0
     push {r1}
+    bl pause_sys_tick
     // get interrupt number
     mrs r0, ipsr
     movs r3, #0x1f
     ands r0, r3
     subs r0, #16
     bl irq_handler
+    bl start_sys_tick
     pop {r0}
     b exit_exception
 
 _proc_switch:
+    // pause system tick
+    bl pause_sys_tick
     // get current process
     bl get_current_proc
     // check if currently running a process and if so, save the state
     movs r0, r0
     beq 1f
+    // save current process codes
+    bl update_codes
     mov r2, r0
     // store unsaved process registers (r4 to r11)
     stm r2!, {r4-r7}
@@ -268,10 +265,8 @@ _proc_switch:
     mrs r1, psp
     // save stack pointer
     str r1, [r2, #4]
-    // save current process codes
-    bl update_codes
 1:
-    bl timer0
+    bl sys_tick
     // if got null pointer (no process) wait for an interrupt and try again
 2:
     movs r0, r0

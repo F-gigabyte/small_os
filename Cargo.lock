@@ -24,7 +24,7 @@ dependencies = [
 [[package]]
 name = "crc32"
 version = "0.1.0"
-source = "git+ssh://git@github.com/F-gigabyte/crc32.git#e6d41ceec747d265a7f539686de87ad5ff05dccf"
+source = "git+ssh://git@github.com/F-gigabyte/crc32.git#661fc5cd77b7f07432a815bf74443ad6136f50ac"
 
 [[package]]
 name = "debug-helper"
@@ -41,7 +41,10 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 [[package]]
 name = "hamming"
 version = "0.1.0"
-source = "git+ssh://git@github.com/F-gigabyte/hamming.git#dc9563a34c95e676c5e721cfc4d28199542c6464"
+source = "git+ssh://git@github.com/F-gigabyte/hamming.git#b976187296bb0d06a37dabcace0b2cd133b31d86"
+dependencies = [
+ "crc32",
+]
 
 [[package]]
 name = "kernel"
@@ -134,18 +137,18 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "zerocopy"
-version = "0.8.40"
+version = "0.8.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a789c6e490b576db9f7e6b6d661bcc9799f7c0ac8352f56ea20193b2681532e5"
+checksum = "f2578b716f8a7a858b7f02d5bd870c14bf4ddbbcf3a4c05414ba6503640505e3"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.40"
+version = "0.8.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f65c489a7071a749c849713807783f70672b28094011623e200cb86dcb835953"
+checksum = "7e6cc098ea4d3bd6246687de65af3f920c430e236bee1e3bf2e441463f08a02f"
 dependencies = [
  "proc-macro2",
  "quote",

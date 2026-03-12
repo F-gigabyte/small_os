@@ -1,6 +1,6 @@
-use core::ptr;
+use core::{mem, ptr};
 
-use crate::{program::{AccessAttr, Program, Region}};
+use crate::{program::{AccessAttr, Program}};
 
 mod proc_flags {
     pub const PRIORITY_SHIFT: usize = 0;
@@ -20,44 +20,6 @@ pub enum ProcState {
     Dead = 5
 }
 
-pub struct RegisterUpdate {
-    pub r0: Option<u32>,
-    pub r1: Option<u32>,
-    pub r2: Option<u32>,
-    pub r3: Option<u32>,
-    pub r12: Option<u32>,
-    pub lr: Option<u32>
-}
-
-impl RegisterUpdate {
-    pub fn calc_stack_size(&self) -> u32 {
-        if self.lr.is_some() {
-            24
-        } else if self.r12.is_some() {
-            20
-        } else if self.r3.is_some() {
-            16
-        } else if self.r2.is_some() {
-            12
-        } else if self.r1.is_some() {
-            8
-        } else if self.r0.is_some() {
-            4
-        } else {
-            0
-        }
-    }
-}
-
-pub struct Registers {
-    pub r0: u32,
-    pub r1: u32,
-    pub r2: u32,
-    pub r3: u32,
-    pub r12: u32,
-    pub lr: u32
-}
-
 impl TryFrom<u32> for ProcState {
     type Error = u32;
     fn try_from(value: u32) -> Result<Self, Self::Error> {
@@ -71,19 +33,6 @@ impl TryFrom<u32> for ProcState {
             _ => Err(value)
         }
     }
-}
-
-fn check_region_access(addr: u32, len: u32, perm: AccessAttr, regions: &[Region]) -> Result<usize, ()> {
-    for (i, region) in regions.iter().enumerate() {
-        if region.enabled() {
-            let start = region.get_runtime_addr().unwrap();
-            let end = start + region.len;
-            if start <= addr && addr + len <= end && region.get_attr().unwrap().access_valid(perm) {
-                return Ok(i)
-            }
-        }
-    }
-    Err(())
 }
 
 #[derive(Debug)]
@@ -146,224 +95,68 @@ impl Proc {
         ((self.flags & proc_flags::PRIORITY_MASK) >> proc_flags::PRIORITY_SHIFT) as u8
     }
 
-    pub fn set_registers(&mut self, registers: &RegisterUpdate) -> Result<(), ProcError> {
+    fn set_stack_offset(&mut self, offset: usize, word: u32) -> Result<(), ProcError> {
         let program = unsafe {
             &mut *self.program
         };
-        let sp_region = self.check_access(self.psp, registers.calc_stack_size(), AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
-        unsafe {
-            if let Some(r0) = registers.r0 {
-                *stack = r0;
-            }
-            if let Some(r1) = registers.r1 {
-                *stack.add(1) = r1;
-            }
-            if let Some(r2) = registers.r2 {
-                *stack.add(2) = r2;
-            }
-            if let Some(r3) = registers.r3 {
-                *stack.add(3) = r3;
-            }
-            if let Some(r12) = registers.r12 {
-                *stack.add(4) = r12;
-            }
-            if let Some(lr) = registers.lr {
-                *stack.add(5) = lr;
-            }
-        }
-        sp_region.encode_codes(program.block_len);
+        program.write_word(self.psp + (offset * mem::size_of::<u32>()) as u32, word).map_err(|_| ProcError::NotOnStack)?;
         Ok(())
+    }
+    
+    fn get_stack_offset(&mut self, offset: usize) -> Result<u32, ProcError> {
+        let program = unsafe {
+            &mut *self.program
+        };
+        let word = program.read_word(self.psp + (offset * mem::size_of::<u32>()) as u32).map_err(|_| ProcError::NotOnStack)?;
+        Ok(word)
     }
 
     pub fn set_r0(&mut self, r0: u32) -> Result<(), ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp, 4, AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
-        unsafe {
-            *stack = r0;
-        }
-        sp_region.encode_codes(program.block_len);
-        Ok(())
+        self.set_stack_offset(0, r0)
     }
     
     pub fn set_r1(&mut self, r1: u32) -> Result<(), ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp + 4, 4, AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
-        unsafe {
-            *stack.add(1) = r1;
-        }
-        sp_region.encode_codes(program.block_len);
-        Ok(())
+        self.set_stack_offset(1, r1)
     }
     
     pub fn set_r2(&mut self, r2: u32) -> Result<(), ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp + 8, 4, AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
-        unsafe {
-            *stack.add(2) = r2;
-        }
-        sp_region.encode_codes(program.block_len);
-        Ok(())
+        self.set_stack_offset(2, r2)
     }
     
     pub fn set_r3(&mut self, r3: u32) -> Result<(), ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp + 12, 4, AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
-        unsafe {
-            *stack.add(3) = r3;
-        }
-        sp_region.encode_codes(program.block_len);
-        Ok(())
+        self.set_stack_offset(3, r3)
     }
     
     pub fn set_r12(&mut self, r12: u32) -> Result<(), ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp + 16, 4, AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
-        unsafe {
-            *stack.add(4) = r12;
-        }
-        sp_region.encode_codes(program.block_len);
-        Ok(())
+        self.set_stack_offset(4, r12)
     }
     
     pub fn get_r0(&mut self) -> Result<u32, ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp, 4, AccessAttr::new(true, false, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *const u32 = ptr::with_exposed_provenance(self.psp as usize);
-        unsafe {
-            Ok(*stack)
-        }
+        self.get_stack_offset(0)
     }
     
     pub fn get_r1(&mut self) -> Result<u32, ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp + 4, 4, AccessAttr::new(true, false, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *const u32 = ptr::with_exposed_provenance(self.psp as usize);
-        unsafe {
-            Ok(*stack.add(1))
-        }
+        self.get_stack_offset(1)
     }
     
     pub fn get_r2(&mut self) -> Result<u32, ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp + 8, 4, AccessAttr::new(true, false, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *const u32 = ptr::with_exposed_provenance(self.psp as usize);
-        unsafe {
-            Ok(*stack.add(2))
-        }
+        self.get_stack_offset(2)
     }
     
-    pub fn get_r3(&self) -> Result<u32, ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp + 12, 4, AccessAttr::new(true, false, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *const u32 = ptr::with_exposed_provenance(self.psp as usize);
-        unsafe {
-            Ok(*stack.add(3))
-        }
+    pub fn get_r3(&mut self) -> Result<u32, ProcError> {
+        self.get_stack_offset(3)
     }
     
-    pub fn get_r12(&self) -> Result<u32, ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp + 16, 4, AccessAttr::new(true, false, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *const u32 = ptr::with_exposed_provenance(self.psp as usize);
-        unsafe {
-            Ok(*stack.add(4))
-        }
-    }
-
-    pub fn get_registers(&self) -> Result<Registers, ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp, 24, AccessAttr::new(true, false, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
-        unsafe {
-            Ok(Registers {
-                r0: *stack,
-                r1: *stack.add(1),
-                r2: *stack.add(2),
-                r3: *stack.add(3),
-                r12: *stack.add(4),
-                lr: *stack.add(5)
-            })
-        }
+    pub fn get_r12(&mut self) -> Result<u32, ProcError> {
+        self.get_stack_offset(4)
     }
 
     pub fn set_lr(&mut self, lr: u32) -> Result<(), ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp + 20, 4, AccessAttr::new(true, true, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *mut u32 = ptr::with_exposed_provenance_mut(self.psp as usize);
-        unsafe {
-            *stack.add(5) = lr;
-        }
-        sp_region.encode_codes(program.block_len);
-        Ok(())
+        self.set_stack_offset(5, lr)
     }
     
     pub fn get_lr(&mut self) -> Result<u32, ProcError> {
-        let program = unsafe {
-            &mut *self.program
-        };
-        let sp_region = self.check_access(self.psp + 20, 4, AccessAttr::new(true, false, false)).map_err(|_| ProcError::NotOnStack)?;
-        let sp_region = &mut program.regions[sp_region];
-        sp_region.fix_valid(program.block_len).map_err(|_| ProcError::ErrorCode)?;
-        let stack: *const u32 = ptr::with_exposed_provenance(self.psp as usize);
-        unsafe {
-            Ok(*stack.add(5))
-        }
+        self.get_stack_offset(5)
     }
 
     // SAFETY
@@ -378,15 +171,10 @@ impl Proc {
         let sp_region = &program.regions[program.sp as usize];
         let mut sp = sp_region.get_runtime_addr().unwrap() + sp_region.actual_len;
         sp -= 8 * 4;
-        check_region_access(sp, 8 * 4, AccessAttr::new(true, true, false), &program.regions).map_err(|_| ProcError::StackTooSmall)?;
-        let stack: &mut [u32; 8] = unsafe {
-            // reserve 8 registers for initial setup
-            &mut *ptr::with_exposed_provenance_mut(sp as usize)
-        };
-        stack[0] = r0;
-        stack[6] = program.entry;
-        stack[7] = 0x01000000; // set thumb mode but nothing else
-        program.regions[program.sp as usize].encode_codes(program.block_len);
+        program.write_word(sp, r0).map_err(|_| ProcError::StackTooSmall)?;
+        program.write_word(sp + 6 * mem::size_of::<u32>() as u32, program.entry).map_err(|_| ProcError::StackTooSmall)?;
+        // set thumb mode but nothing else
+        program.write_word(sp + 7 * mem::size_of::<u32>() as u32, 0x1000000).map_err(|_| ProcError::StackTooSmall)?;
         self.pid = pid;
         self.psp = sp;
         self.flags = (program.priority() as u32) << proc_flags::PRIORITY_SHIFT | ((ProcState::Init as u32) << proc_flags::STATE_SHIFT);
@@ -394,39 +182,53 @@ impl Proc {
         Ok(())
     }
 
-    pub fn check_access(&self, addr: u32, len: u32, perm: AccessAttr) -> Result<usize, ()> {
-        let prog = unsafe {
-            & *self.program
-        };
-        check_region_access(addr, len, perm, &prog.regions)
-    }
-
     pub fn correct_errors(&mut self) -> Result<(), ()> {
         let prog = unsafe {
             &mut *self.program
         };
-        for region in &mut prog.regions {
-            if region.enabled() {
-                region.check_crc().unwrap_or(Ok(())).expect("Have uncorrectable flash error");
-            }
-        }
-        for region in &mut prog.regions {
-            if region.enabled() {
-                region.fix_valid(prog.block_len)?;
-            }
-        }
-        Ok(())
+        prog.correct_errors()
     }
     
     pub fn update_codes(&mut self) {
         let prog = unsafe {
             &mut *self.program
         };
-        for region in &mut prog.regions {
-            if region.enabled() {
-                region.encode_codes(prog.block_len);
-            }
-        }
+        prog.update_codes();
+    }
+
+    pub fn write_word(&mut self, addr: u32, word: u32) -> Result<(), ()> {
+        let prog = unsafe {
+            &mut *self.program
+        };
+        prog.write_word(addr, word)
+    }
+    
+    pub fn write_bytes(&mut self, addr: u32, data: &[u8]) -> Result<(), ()> {
+        let prog = unsafe {
+            &mut *self.program
+        };
+        prog.write_bytes(addr, data)
+    }
+    
+    pub fn read_word(&mut self, addr: u32) -> Result<u32, ()> {
+        let prog = unsafe {
+            &mut *self.program
+        };
+        prog.read_word(addr)
+    }
+    
+    pub fn read_bytes(&mut self, addr: u32, len: usize) -> Result<&[u8], ()> {
+        let prog = unsafe {
+            &mut *self.program
+        };
+        prog.read_bytes(addr, len)
+    }
+
+    pub fn check_access(&self, addr: u32, len: u32, attr: AccessAttr) -> Result<(), ()> {
+        let prog = unsafe {
+            & *self.program
+        };
+        prog.check_access(addr, len, attr)
     }
 }
 

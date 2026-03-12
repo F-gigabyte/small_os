@@ -12,9 +12,9 @@
 
 use core::{panic::PanicInfo, ptr, slice};
 
-use crc32::calc_crc;
-use hamming::calc_symbols;
-
+use crate::scheduler::QUANTUM_MICROS;
+use crate::sys_tick::SYS_TICK;
+use crate::wait::wait_cycles;
 use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, mpu::MPU, mutex::{SpinIRQGuard, force_spinlock_unlock}, nvic::{NVIC, irqs}, pll::PLL, program::init_processes, reset::RESET, rosc::ROSC, system::SYSTEM, timer::{TIMER, Timer, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
 
 pub mod uart;
@@ -40,48 +40,6 @@ pub mod messages;
 pub mod message_queue;
 pub mod program;
 pub mod mpu;
-
-fn time_hamming<'a, 'b>(timer: &mut SpinIRQGuard<'a, 'b, Timer>, addr: usize) {
-    let start = addr;
-    let end = addr + 247 * 4;
-    let start_time = timer.read_time();
-    let data = unsafe {
-        slice::from_raw_parts(ptr::with_exposed_provenance(addr), 247)
-    };
-    let mut symbols = [0; 9];
-    calc_symbols(&mut symbols, data);
-    let end_time = timer.read_time();
-    let time = end_time.wrapping_sub(start_time);
-    println!("0x{:x} -> 0x{:x} in {}us with codes {:?}", start, end, time, symbols);
-}
-
-fn time_crc<'a, 'b>(timer: &mut SpinIRQGuard<'a, 'b, Timer>, addr: usize) {
-    let start = addr;
-    let end = addr + 247 * 4;
-    let start_time = timer.read_time();
-    let data = unsafe {
-        slice::from_raw_parts(ptr::with_exposed_provenance(addr), 247 * 4)
-    };
-    let crc = calc_crc(data);
-    let end_time = timer.read_time();
-    let time = end_time.wrapping_sub(start_time);
-    println!("0x{:x} -> 0x{:x} in {}us with crc {:?}", start, end, time, crc);
-}
-
-fn time_mem_read<'a, 'b>(timer: &mut SpinIRQGuard<'a, 'b, Timer>, start: usize, end: usize) {
-    let start_time = timer.read_time();
-    let len = (end - start) / 4;
-    let mut ptr: *const u32 = ptr::with_exposed_provenance(start);
-    for _ in 0..len {
-        unsafe {
-            _ = ptr.read_volatile();
-            ptr = ptr.add(1);
-        }
-    }
-    let end_time = timer.read_time();
-    let time = end_time.wrapping_sub(start_time);
-    println!("0x{:x} -> 0x{:x} in {}us", start, end, time);
-}
 
 unsafe extern "C" {
     static __stack: u8;
@@ -164,29 +122,25 @@ pub extern "C" fn main() -> ! {
             uart1.reset();
         }
 
-        let mut timer = TIMER.lock(&cs);
         let mut watchdog = WATCHDOG.lock(&cs);
         watchdog.enable_ticks();
-        timer.remove_debug_pause();
+        let mut sys_tick = SYS_TICK.lock(&cs);
+        sys_tick.set_timeout(QUANTUM_MICROS);
+        sys_tick.init();
+        println!("First read {}", sys_tick.read_current());
+        wait_cycles(10);
+        println!("Second read {}", sys_tick.read_current());
         let mut nvic = NVIC.lock(&cs);
         nvic.enable_irq(irqs::TIMER0);
         let mut mpu = MPU.lock(&cs);
         mpu.init();
-        time_crc(&mut timer, 0x20000000);
         {
             unsafe {
                 init_processes(&cs);
             }
         }
         let mut sys = SYSTEM.lock(&cs);
-        #[cfg(not(test))]
         sys.send_pend();
-        timer.clear_irq(TimerIRQ::Timer0);
-        timer.clear_irq(TimerIRQ::Timer1);
-        timer.clear_irq(TimerIRQ::Timer2);
-        timer.clear_irq(TimerIRQ::Timer3);
-        #[cfg(not(test))]
-        timer.enable_irq(TimerIRQ::Timer0);
     }
     // SAFETY
     // IRQ has been setup and can now run

@@ -16,9 +16,9 @@ _vec_table:
     .word 0 // reserved (12)
     .word 0 // reserved (13)
     .word _sys_pend // svc pend (14)
-    .word _sys_tick // sys tick (15)
+    .word _proc_switch // sys tick (15)
 // interrupts
-    .word _proc_switch // IRQ 0 -> timer irq 0 (16)
+    .word _irq_entry // IRQ 0 -> timer irq 0 (16)
     .word _irq_entry // IRQ 1 -> timer irq 1 (17)
     .word _irq_entry // IRQ 2 -> timer irq 2 (18)
     .word _irq_entry // IRQ 3 -> timer irq 3 (19)
