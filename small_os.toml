@@ -6,8 +6,8 @@ release_src = "target/thumbv6m-none-eabi/release/kernel"
 
 [[programs]]
 name = "test_driver"
-priority = 0
-driver = 0
+priority = 128
+driver = ""
 debug_src = "target/thumbv6m-none-eabi/debug/test_driver"
 release_src = "target/thumbv6m-none-eabi/release/test_driver"
 num_sync_queues = 0
@@ -18,12 +18,36 @@ block_len = 247
 
 [[programs]]
 name = "uart"
-priority = 0
-driver = 1
+priority = 128
+driver = "UART0"
 debug_src = "target/thumbv6m-none-eabi/debug/uart"
 release_src = "target/thumbv6m-none-eabi/release/uart"
 num_sync_queues = 1
 async_queues = []
+sync_endpoints = [{ name = "reset", queue = 0 }, { name = "io_bank0", queue = 0 }]
+async_endpoints = []
+block_len = 247
+
+[[programs]]
+name = "reset"
+priority = 128
+driver = "Subsystem Reset"
+debug_src = "target/thumbv6m-none-eabi/debug/reset"
+release_src = "target/thumbv6m-none-eabi/release/reset"
+num_sync_queues = 1
+async_queues = []
 sync_endpoints = []
+async_endpoints = []
+block_len = 247
+
+[[programs]]
+name = "io_bank0"
+priority = 128
+driver = "IO Bank0"
+debug_src = "target/thumbv6m-none-eabi/debug/io_bank0"
+release_src = "target/thumbv6m-none-eabi/release/io_bank0"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "reset", queue = 0 }]
 async_endpoints = []
 block_len = 247

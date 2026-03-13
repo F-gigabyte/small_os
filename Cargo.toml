@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["kernel", "small_os_lib", "test_driver", "uart"]
+members = ["io_bank0","kernel", "reset", "small_os_lib", "test_driver", "uart"]
 
 [profile.release]
 debug = "full"

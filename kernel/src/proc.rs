@@ -17,7 +17,8 @@ pub enum ProcState {
     Scheduled = 2,
     Running = 3,
     Blocked = 4,
-    Dead = 5
+    BlockedIRQ = 5,
+    Dead = 6
 }
 
 impl TryFrom<u32> for ProcState {
@@ -41,7 +42,8 @@ pub enum ProcError {
     InvalidState,
     StackTooSmall,
     NotOnStack,
-    ErrorCode
+    ErrorCode,
+    IRQTaken
 }
 
 #[repr(C)]
@@ -83,6 +85,13 @@ impl Proc {
     pub fn set_state(&mut self, state: ProcState) {
         self.flags &= !proc_flags::STATE_MASK;
         self.flags |= (state as u32) << proc_flags::STATE_SHIFT;
+    }
+
+    pub fn index_irq(&self, irq: u8) -> Option<usize> {
+        let prog = unsafe {
+            &*self.program
+        };
+        prog.index_irq(irq)
     }
     
     /// gets the state

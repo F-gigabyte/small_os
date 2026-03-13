@@ -1,4 +1,4 @@
-use core::ptr::{self, NonNull};
+use core::{arch::asm, ptr::{self, NonNull}};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::ReadPureWrite};
 
@@ -12,6 +12,7 @@ struct XOSCRegisters {
     status: ReadPureWrite<u32>,
     dormant: ReadPureWrite<u32>,
     startup: ReadPureWrite<u32>,
+    count: ReadPureWrite<u32>
 }
 
 mod ctrl_register {
@@ -81,6 +82,16 @@ impl XOSC {
         field!(self.registers, ctrl).write(ctrl_register::FREQ_RANGE_1_15MHZ);
         field!(self.set_reg, ctrl).write(ctrl_register::ENABLE_ENABLE);
         while field!(self.registers, status).read() & status_register::STABLE_MASK == 0 {}
+    }
+
+    /// Waits for `cycles` / 12 us 
+    pub fn wait_cycles(&mut self, cycles: u8) {
+        field!(self.registers, count).write(((cycles as u32) << count_register::COUNTER_SHIFT) & count_register::COUNTER_MASK);
+        while field!(self.registers, count).read() != 0 {
+            unsafe {
+                asm!("nop");
+            }
+        }
     }
 }
 

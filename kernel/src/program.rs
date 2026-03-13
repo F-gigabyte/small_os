@@ -1,9 +1,9 @@
-use core::{arch::asm, cell::UnsafeCell, mem, ptr, slice};
+use core::{cell::UnsafeCell, mem, ptr, slice};
 
-use crc32::{calc_crc, check_crc};
+use crc32::{check_crc};
 use hamming::{calc_symbol_len, calc_symbols, check_hamming_crc, correct_errors, update_msg};
 
-use crate::{inter::{CS, without_inter}, message_queue::{AsyncMessageQueue, SyncMessageQueue}, println, proc::Proc, scheduler::scheduler, timer::TIMER};
+use crate::{inter::CS, message_queue::{AsyncMessageQueue, SyncMessageQueue}, println, proc::Proc, scheduler::scheduler};
 
 fn read_time() -> u64 {
     let addr = 0x40054000;
@@ -463,13 +463,14 @@ impl Region {
     }
 
     pub fn size(&self) -> u32 {
-        (1 << (self.get_len() + 1))
+        1 << (self.get_len() + 1)
     }
 }
 
 #[repr(C)]
 pub struct Program {
     pub flags: u32,
+    pub inter: [u8; 4],
     pub sp: u32,
     pub entry: u32,
     pub regions: [Region; 8],
@@ -487,11 +488,9 @@ pub struct Program {
 impl Program {
     const PRIORITY_SHIFT: usize = 0;
     const DRIVER_SHIFT: usize = 16;
-    const INTERRUPT_SHIFT: usize = 8;
 
     const PRIORITY_MASK: u32 = 0xff << Self::PRIORITY_SHIFT;
     const DRIVER_MASK: u32 = 0xffff << Self::DRIVER_SHIFT;
-    const INTERRUPT_MASK: u32 = 0xff << Self::INTERRUPT_SHIFT;
     const INTERRUPT_NONE: u8 = 0xff;
 
     pub fn priority(&self) -> u8 {
@@ -502,13 +501,40 @@ impl Program {
         ((self.flags & Self::DRIVER_MASK) >> Self::DRIVER_SHIFT) as u16
     }
 
-    pub fn interrupt(&self) -> Option<u8> {
-        let inter = ((self.flags & Self::INTERRUPT_MASK) >> Self::INTERRUPT_SHIFT) as u8;
+    pub fn interrupt(&self, inter: usize) -> Option<u8> {
+        let inter = self.inter[inter];
         if inter >= 32 {
             None
         } else {
             Some(inter)
         }
+    }
+    
+    pub fn interrupts(&self) -> &[u8] {
+        &self.inter
+    }
+    
+    pub fn interrupts_mut(&mut self) -> &mut [u8] {
+        &mut self.inter
+    }
+
+    pub fn has_interrupt(&self) -> bool {
+        for inter in self.inter {
+            if inter < 32 {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns index of irq
+    pub fn index_irq(&self, irq: u8) -> Option<usize> {
+        for (i, inter) in self.inter.iter().enumerate() {
+            if *inter == irq {
+                return Some(i);
+            }
+        }
+        None
     }
 
     pub fn write_word(&mut self, addr: u32, word: u32) -> Result<(), ()> {
@@ -622,9 +648,7 @@ impl Program {
     pub fn correct_errors(&mut self) -> Result<(), ()> {
         for region in &mut self.regions {
             if region.enabled() {
-                if let Err(err) = region.check_crc().unwrap_or(Ok(())){
-                    panic!("Have uncorrectable flash error at 0x{:x}, 0x{:x}", region.phys_addr, region.actual_len);
-                }
+                region.check_crc().unwrap_or(Ok(())).expect("Have uncorrectable flash error");
             }
         }
         for region in &mut self.regions {

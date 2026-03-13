@@ -214,7 +214,7 @@ impl UART {
         // enable UART and TX section
         field!(self.registers, ctrl).write(ctrl_register::TXE_MASK | ctrl_register::UARTEN_MASK);
         // in release builds, if this is not there garbage is printed to the screen
-        wait_cycles(1000);
+        wait_cycles(1000000);
     }
 
     #[inline(always)]

@@ -10,11 +10,10 @@
 #![no_main]
 #![reexport_test_harness_main = "test_main"]
 
-use core::{panic::PanicInfo, ptr, slice};
+use core::{panic::PanicInfo};
 
 use crate::scheduler::QUANTUM_MICROS;
 use crate::sys_tick::SYS_TICK;
-use crate::wait::wait_cycles;
 use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, mpu::MPU, mutex::{SpinIRQGuard, force_spinlock_unlock}, nvic::{NVIC, irqs}, pll::PLL, program::init_processes, reset::RESET, rosc::ROSC, system::SYSTEM, timer::{TIMER, Timer, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
 
 pub mod uart;
@@ -110,12 +109,10 @@ pub extern "C" fn main() -> ! {
         let mut rosc = ROSC.lock(&cs);
         rosc.disable();
         reset.reset_iobank0();
-        reset.reset_uarts();
-        reset.reset_timer();
+        reset.reset_uart1();
 
         let mut io_bank0 = IOBANK0.lock(&cs);
         io_bank0.set_gpio_uart1();
-        io_bank0.set_gpio_uart0();
 
         {
             let mut uart1 = UART1.lock(&cs);
@@ -127,9 +124,6 @@ pub extern "C" fn main() -> ! {
         let mut sys_tick = SYS_TICK.lock(&cs);
         sys_tick.set_timeout(QUANTUM_MICROS);
         sys_tick.init();
-        println!("First read {}", sys_tick.read_current());
-        wait_cycles(10);
-        println!("Second read {}", sys_tick.read_current());
         let mut nvic = NVIC.lock(&cs);
         nvic.enable_irq(irqs::TIMER0);
         let mut mpu = MPU.lock(&cs);

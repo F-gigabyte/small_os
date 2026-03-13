@@ -5,7 +5,10 @@ use crate::{inter::CS, message_queue::QueueError, messages::MessageHeader, mutex
 // If this is changed, must change Proc struct
 const NUM_PRIORITIES: usize = 256;
 
-pub const QUANTUM_MICROS: u32 = 100000;
+#[cfg(debug_assertions)]
+pub const QUANTUM_MICROS: u32 = 1000;
+#[cfg(not(debug_assertions))]
+pub const QUANTUM_MICROS: u32 = 100;
 
 pub struct Scheduler {
     // processes managed by scheduler
@@ -53,8 +56,23 @@ impl Scheduler {
         }
         let proc = self.processes[pid as usize].get_mut();
         if proc.get_state() == ProcState::Free {
+            let inter = program.inter;
+            for inter in inter {
+                let inter = inter as usize;
+                if inter < self.irq_events.len() {
+                    if !self.irq_events[inter].is_null() {
+                        return Err(ProcError::IRQTaken);
+                    }
+                }
+            }
             unsafe {
                 proc.init(pid, program, r0)?;
+            }
+            for inter in inter {
+                let inter = inter as usize;
+                if inter < self.irq_events.len() {
+                    self.irq_events[inter] = proc;
+                }
             }
             Ok(pid)
         } else {
@@ -83,7 +101,7 @@ impl Scheduler {
         // Check proc is still alive and if not free it
         // This is safe to do as proc isn't referenced anywhere else
         if proc.get_state() == ProcState::Dead {
-            proc.set_state(ProcState::Free);
+            Self::free_proc(&mut self.irq_events, proc);
         }
         if !self.current.is_null() {
             let current = unsafe {
@@ -189,7 +207,7 @@ impl Scheduler {
                 }
                 // If process is dead, free it as it's not referenced by anything else
                 if proc.get_state() == ProcState::Dead {
-                    proc.set_state(ProcState::Free);
+                    Self::free_proc(&mut self.irq_events, proc);
                     continue;
                 }
                 proc.set_state(ProcState::Running);
@@ -207,7 +225,7 @@ impl Scheduler {
                 &mut *self.current
             };
             self.current = ptr::null_mut();
-            current.set_state(ProcState::Free);
+            Self::free_proc(&mut self.irq_events, current);
         }
     }
 
@@ -256,16 +274,13 @@ impl Scheduler {
 
     /// Suspends the current process to wait for IRQ number `irq`
     /// `irq` must be a valid IRQ number
-    pub fn sleep_irq(&mut self, irq: u8) {
+    pub fn sleep_irq(&mut self) {
         if !self.current.is_null() {
-            let irq = irq as usize;
             let current = unsafe {
                 &mut *self.current
             };
             self.current = ptr::null_mut();
-            current.set_state(ProcState::Blocked);
-            current.next = self.irq_events[irq];
-            self.irq_events[irq] = self.current;
+            current.set_state(ProcState::BlockedIRQ);
         }
     }
 
@@ -273,24 +288,38 @@ impl Scheduler {
     /// `irq` must be a valid IRQ number
     pub fn wake(&mut self, irq: u8) {
         let irq = irq as usize;
-        let mut current = self.irq_events[irq];
-        while !current.is_null() {
+        let current = self.irq_events[irq];
+        if !current.is_null() {
             let proc = unsafe {
                 &mut *current
             };
-            let next = proc.next;
-            if proc.get_state() == ProcState::Blocked {
-                _ = proc.set_r0(irq as u32);
+            if proc.get_state() == ProcState::BlockedIRQ {
+                // fine to unwrap as this should be one of this processes IRQs
+                _ = proc.set_r0(proc.index_irq(irq as u8).unwrap() as u32);
                 proc.set_state(ProcState::Running);
                 unsafe {
                     self.schedule_internal(proc);
                 }
             } else if proc.get_state() == ProcState::Dead {
-                proc.set_state(ProcState::Free);
+                Self::free_proc(&mut self.irq_events, proc);
             }
-            current = next;
         }
-        self.irq_events[irq] = ptr::null_mut();
+    }
+
+    fn free_proc(irq_events: &mut [*mut Proc], proc: *mut Proc) {
+        let inter = unsafe {
+            (*(*proc).program).inter
+        };
+        // use proc interrupts to remove process from IRQ events
+        for irq in inter {
+            if (irq as usize) < irq_events.len() {
+                irq_events[irq as usize] = ptr::null_mut();
+            }
+        }
+        let proc = unsafe {
+            &mut *proc
+        };
+        proc.set_state(ProcState::Free);
     }
 
     pub fn send(&mut self, endpoint: u32, tag: u32, len: u32, data: *mut u8) -> Result<(), QueueError> {
@@ -550,7 +579,7 @@ impl Scheduler {
             Ok(())
         } else if matches!(state, ProcState::Running | ProcState::Init) {
             // free proc as not referenced anywhere else
-            proc.set_state(ProcState::Free);
+            Self::free_proc(&mut self.irq_events, proc);
             self.current = ptr::null_mut();
             Ok(())
         } else {

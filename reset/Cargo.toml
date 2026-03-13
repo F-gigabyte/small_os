@@ -1,0 +1,8 @@
+[package]
+name = "reset"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+safe-mmio = "0.3.0"
+small_os_lib = { path = "../small_os_lib" }

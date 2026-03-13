@@ -20,10 +20,7 @@ use crate::{nvic::NVIC, println, proc::Proc, program::AccessAttr, scheduler::{QU
 #[derive(Debug)]
 pub enum SysCall {
     // 0
-    KPrint {
-        data: *mut u8,
-        len: u32
-    },
+    Yield {},
     // 1
     Exit {
         code: u32
@@ -98,10 +95,7 @@ impl TryFrom<&StackTrace> for SysCall {
     type Error = ();
     fn try_from(stack: &StackTrace) -> Result<Self, ()> {
         match stack.r12 {
-            0 => Ok(SysCall::KPrint { 
-                data: ptr::with_exposed_provenance_mut(stack.r0 as usize), 
-                len: stack.r1 
-            }),
+            0 => Ok(SysCall::Yield {}),
             1 => Ok(SysCall::Exit { 
                 code: stack.r0
             }),
@@ -258,24 +252,13 @@ pub extern "C" fn irq_handler(irq: u8) {
     scheduler.wake(irq);
 }
 
-fn do_sys_call(sys_call: SysCall, stack: &mut StackTrace, cs: &CS) -> Result<(), u32> {
+fn do_sys_call(sys_call: SysCall, cs: &CS) -> Result<(), u32> {
     match sys_call {
         // kernel print
-        SysCall::KPrint { 
-            data, 
-            len 
-        } => {
-            let current = unsafe {
-                &mut *scheduler(cs).get_current()
-            };
-            let text = current.read_bytes(data as u32, len as usize).map_err(|_| 1u32)?;
-            if let Ok(text) = str::from_utf8(text) {
-                println!("{}", text);
-                stack.r0 = text.len() as u32;
-                Ok(())
-            } else {
-                Err(0)
-            }
+        SysCall::Yield {} => {
+            let mut scheduler = scheduler(cs);
+            scheduler.yield_current();
+            Ok(())
         },
         // exit
         SysCall::Exit { 
@@ -293,11 +276,15 @@ fn do_sys_call(sys_call: SysCall, stack: &mut StackTrace, cs: &CS) -> Result<(),
                 & *(*current).program
             };
 
-            if let Some(inter) = program.interrupt() {
-                scheduler.sleep_irq(inter);
+            if program.has_interrupt() {
+                scheduler.sleep_irq();
                 let mut nvic = NVIC.lock(&cs);
-                // enable the IRQ for firing
-                nvic.enable_irq(inter);
+                // enable the IRQs for firing
+                for inter in program.interrupts() {
+                    if *inter < 32 {
+                        nvic.enable_irq(*inter);
+                    }
+                }
                 Ok(())
             } else {
                 Err(u32::from(IRQError::NoIRQ))
@@ -394,7 +381,7 @@ pub extern "C" fn sys_call(stack: *mut StackTrace) -> *mut Proc {
     };
     match SysCall::try_from(&*stack) {
         Ok(sys_call) => {
-            match do_sys_call(sys_call, stack, &cs) {
+            match do_sys_call(sys_call, &cs) {
                 Ok(_) => {
                     // success
                     let prev = unsafe {
@@ -420,7 +407,6 @@ pub extern "C" fn sys_call(stack: *mut StackTrace) -> *mut Proc {
         }
     }
     let mut scheduler = scheduler(&cs);
-    scheduler.update_current_codes();
 
     // only switch out if current is blocked or its time slice expired
     scheduler.next_current_process();

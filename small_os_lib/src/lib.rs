@@ -4,40 +4,12 @@
 #![no_std]
 #![no_main]
 
-use core::{arch::asm, fmt::{self, Write}};
+use core::{arch::asm};
 
 // offset for clearing registers as specified in SDK https://github.com/raspberrypi/pico-sdk/blob/a1438dff1d38bd9c65dbd693f0e5db4b9ae91779/src/rp2040/hardware_regs/include/hardware/regs/addressmap.h#L21
 // lines 18 to 21 (accessed 19/01/2026)
 pub const REG_ALIAS_SET_BITS: usize = 0x2 << 12;
 pub const REG_ALIAS_CLR_BITS: usize = 0x3 << 12;
-
-struct KPrint {}
-
-impl Write for KPrint {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        let res = kput_str(s);
-        res.map_err(|_| fmt::Error)?;
-        Ok(())
-    }
-}
-
-#[macro_export]
-macro_rules! kprint {
-    ($($arg:tt)*) => ($crate::_kprint(format_args!($($arg)*)));
-}
-
-#[macro_export]
-macro_rules! kprintln {
-    () => ($crate::kprint!("\n"));
-    ($($arg:tt)*) => ($crate::kprint!("{}\n", format_args!($($arg)*)));
-}
-
-#[doc(hidden)]
-pub fn _kprint(args: fmt::Arguments) {
-    let mut kprint = KPrint {};
-    let res = kprint.write_fmt(args);
-    res.unwrap();
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueError {
@@ -49,6 +21,11 @@ pub enum QueueError {
     Died,
     InvalidMemoryAccess,
     SenderInvalidMemoryAccess,
+    Unknown(u32)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum YieldError {
     Unknown(u32)
 }
 
@@ -98,9 +75,8 @@ pub struct SyncHeader {
     pub reply_len: u16
 }
 
-pub fn kput_str(text: &str) -> Result<usize, KPutError> {
+pub fn do_yield() -> Result<(), YieldError> {
     let mut res: u32;
-    let mut printed;
     unsafe {
         asm!(
             "mov r12, {num}",
@@ -108,14 +84,11 @@ pub fn kput_str(text: &str) -> Result<usize, KPutError> {
             "mov {res}, r12",
             num = in(reg) 0, 
             res = out(reg) res,
-            inout("r0") text.as_ptr() => printed,
-            in("r1") text.len()
         );
     }
     match res {
-        0 => Ok(printed),
-        2 => Err(KPutError::NotUTF8),
-        _ => Err(KPutError::Unknown(res))
+        0 => Ok(()),
+        _ => Err(YieldError::Unknown(res))
     }
 }
 

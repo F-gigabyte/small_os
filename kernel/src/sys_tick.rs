@@ -64,7 +64,8 @@ impl SysTick {
 
     #[inline(always)]
     pub fn init(&mut self) {
-        field!(self.registers, ctrl_status).write(ctrl_status_register::TICKINT_MASK | ctrl_status_register::CLOCK_SRC_PROCESSOR);
+        // Use external source so will run at a fixed 1 MHz
+        field!(self.registers, ctrl_status).write(ctrl_status_register::TICKINT_MASK | ctrl_status_register::CLOCK_SRC_EXTERNAL);
     }
 
     #[inline(always)]

@@ -4,10 +4,10 @@
 #![no_std]
 #![no_main]
 
-use core::{arch::asm, intrinsics::abort, panic::PanicInfo, ptr::{self, NonNull}};
+use core::{intrinsics::abort, panic::PanicInfo, ptr::{self, NonNull}};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, ReadWrite, WriteOnly}};
-use small_os_lib::{QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, kprintln, next_valid_header, read_header, receive, reply, reply_empty, send_empty, wait_irq};
+use small_os_lib::{QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, do_yield, read_header, receive, reply, reply_empty, send, send_empty, wait_irq};
 
 #[repr(C)]
 struct UARTRegisters {
@@ -222,7 +222,14 @@ impl UART {
                 tx_enabled: false
             }
         };
-        while field!(res.registers, flag).read() & flag_register::BUSY_MASK != 0 {}
+        loop {
+            let flag = field!(res.registers, flag).read();
+            if flag & flag_register::BUSY_MASK == 0 {
+                break;
+            } else {
+                do_yield().unwrap();
+            }
+        }
         field!(res.registers, ctrl).write(0);
         // clear all interrupts
         field!(res.registers, inter_clr).write(interrupt_register::ALL_MASK);
@@ -457,10 +464,24 @@ impl Request {
     }
 }
 
+const RESET_QUEUE: u32 = 0;
+const RESET_UART0: u32 = 22;
+
+const IO_BANK0_QUEUE: u32 = 1;
+
+const IO_BANK0_GPIO0: u32 = 0;
+const IO_BANK0_GPIO1: u32 = 1;
+
+const FUNC_SEL2: u8 = 2;
+
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
 pub extern "C" fn main(uart_base: usize) {
+    // reset uart 0
+    send(RESET_QUEUE, RESET_UART0, &mut [], 0, 0).unwrap();
+    send(IO_BANK0_QUEUE, IO_BANK0_GPIO0, &mut [FUNC_SEL2], 1, 0).unwrap();
+    send(IO_BANK0_QUEUE, IO_BANK0_GPIO1, &mut [FUNC_SEL2], 1, 0).unwrap();
     let mut uart = unsafe {
         UART::new(uart_base)
     };
