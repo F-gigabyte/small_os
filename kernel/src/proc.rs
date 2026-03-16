@@ -30,7 +30,8 @@ impl TryFrom<u32> for ProcState {
             2 => Ok(ProcState::Scheduled),
             3 => Ok(ProcState::Running),
             4 => Ok(ProcState::Blocked),
-            5 => Ok(ProcState::Dead),
+            5 => Ok(ProcState::BlockedIRQ),
+            6 => Ok(ProcState::Dead),
             _ => Err(value)
         }
     }

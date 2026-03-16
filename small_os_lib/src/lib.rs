@@ -406,3 +406,18 @@ pub fn reply_empty(queue: u32, reply: u32) -> Result<(), QueueError> {
     }
     decode_queue_res(res)
 }
+
+pub enum HeaderError {
+    InvalidSendBuffer,
+    InvalidReplyBuffer
+}
+
+pub fn check_header_len(header: &SyncHeader, send_len: u16, reply_len: u16) -> Result<(), HeaderError> {
+    if header.send_len != send_len {
+        return Err(HeaderError::InvalidSendBuffer);
+    }
+    if header.reply_len != reply_len {
+        return Err(HeaderError::InvalidReplyBuffer);
+    }
+    Ok(())
+}

@@ -104,8 +104,14 @@ impl NVIC {
         field!(self.inter_clear_pend_reg, register).write(1 << irq);
     }
 
+    #[inline(always)]
     pub fn get_pending(&mut self) -> u32 {
         field!(self.inter_set_pend_reg, register).read()
+    }
+
+    #[inline(always)]
+    pub fn disable_irq(&mut self, irq: u8) {
+        field!(self.inter_clear_enable_reg, register).write(1 << irq);
     }
 }
 

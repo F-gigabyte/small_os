@@ -7,7 +7,7 @@
 use core::{intrinsics::abort, panic::PanicInfo, ptr::{self, NonNull}};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, ReadWrite, WriteOnly}};
-use small_os_lib::{QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, do_yield, read_header, receive, reply, reply_empty, send, send_empty, wait_irq};
+use small_os_lib::{QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, check_header_len, do_yield, read_header, receive, reply, reply_empty, send, send_empty, wait_irq};
 
 #[repr(C)]
 struct UARTRegisters {
@@ -437,11 +437,11 @@ impl Request {
         let request = RequestType::try_from(header.tag)?;
         let len = match request {
             RequestType::Send => {
-                if header.reply_len != 0 {
-                    return Err(UARTError::ReplyError(UARTReplyError::InvalidReplyBuffer));
-                }
                 if header.send_len as usize > buffer.len() {
                     return Err(UARTError::ReplyError(UARTReplyError::InvalidSendBuffer));
+                }
+                if header.reply_len != 0 {
+                    return Err(UARTError::ReplyError(UARTReplyError::InvalidReplyBuffer));
                 }
                 _ = receive(0, &mut buffer)?;
                 header.send_len as usize
@@ -494,7 +494,7 @@ pub extern "C" fn main(uart_base: usize) {
                         check_critical(reply_empty(0, 0)).unwrap_or(Ok(())).unwrap();
                     },
                     RequestType::Receive => {
-                        check_critical(reply_empty(0, 0)).unwrap_or(Ok(())).unwrap();
+                        check_critical(reply(0, 0, &request.buffer[..request.len])).unwrap_or(Ok(())).unwrap();
                     }
                 }
             },

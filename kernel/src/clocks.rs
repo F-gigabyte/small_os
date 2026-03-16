@@ -6,37 +6,38 @@ use crate::{mmio::{REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS}, mutex::SpinIRQ, wait
 
 #[repr(C)]
 struct ClockRegisters {
-    gpout0_ctrl: ReadPureWrite<u32>,
-    gpout0_div: ReadPureWrite<u32>,
-    gpout0_selected: ReadPure<u32>,
-    gpout1_ctrl: ReadPureWrite<u32>,
-    gpout1_div: ReadPureWrite<u32>,
-    gpout1_selected: ReadPure<u32>,
-    gpout2_ctrl: ReadPureWrite<u32>,
-    gpout2_div: ReadPureWrite<u32>,
-    gpout2_selected: ReadPure<u32>,
-    gpout3_ctrl: ReadPureWrite<u32>,
-    gpout3_div: ReadPureWrite<u32>,
-    gpout3_selected: ReadPure<u32>,
-    ref_ctrl: ReadPureWrite<u32>,
-    ref_div: ReadPureWrite<u32>,
-    ref_selected: ReadPure<u32>,
-    sys_ctrl: ReadPureWrite<u32>,
-    sys_div: ReadPureWrite<u32>,
-    sys_selected: ReadPure<u32>,
-    peri_ctrl: ReadPureWrite<u32>,
-    peri_selected: ReadPure<u32>,
-    usb_ctrl: ReadPureWrite<u32>,
-    usb_div: ReadPureWrite<u32>,
-    usb_selected: ReadPure<u32>,
-    adc_ctrl: ReadPureWrite<u32>,
-    adc_div: ReadPureWrite<u32>,
-    adc_selected: ReadPure<u32>,
-    rtc_ctrl: ReadPureWrite<u32>,
-    rtc_div: ReadPureWrite<u32>,
-    rtc_selected: ReadPure<u32>,
-    sys_resus_ctrl: ReadPureWrite<u32>,
-    sys_resus_status: ReadWrite<u32>,
+    gpout0_ctrl: ReadPureWrite<u32>, // 0x00
+    gpout0_div: ReadPureWrite<u32>, //  0x04
+    gpout0_selected: ReadPure<u32>, //  0x08
+    gpout1_ctrl: ReadPureWrite<u32>, // 0x0c
+    gpout1_div: ReadPureWrite<u32>, //  0x10
+    gpout1_selected: ReadPure<u32>, //  0x14
+    gpout2_ctrl: ReadPureWrite<u32>, // 0x18
+    gpout2_div: ReadPureWrite<u32>, //  0x1c
+    gpout2_selected: ReadPure<u32>, //  0x20
+    gpout3_ctrl: ReadPureWrite<u32>, // 0x24
+    gpout3_div: ReadPureWrite<u32>, //  0x28
+    gpout3_selected: ReadPure<u32>, //  0x2c
+    ref_ctrl: ReadPureWrite<u32>, //    0x30
+    ref_div: ReadPureWrite<u32>, //     0x34
+    ref_selected: ReadPure<u32>, //     0x38
+    sys_ctrl: ReadPureWrite<u32>, //    0x3c
+    sys_div: ReadPureWrite<u32>, //     0x40
+    sys_selected: ReadPure<u32>, //     0x44
+    peri_ctrl: ReadPureWrite<u32>, //   0x48
+    _reserved: u32,
+    peri_selected: ReadPure<u32>, //    0x50
+    usb_ctrl: ReadPureWrite<u32>, //    0x54
+    usb_div: ReadPureWrite<u32>, //     0x58
+    usb_selected: ReadPure<u32>, //     0x5c
+    adc_ctrl: ReadPureWrite<u32>, //    0x60
+    adc_div: ReadPureWrite<u32>, //     0x64
+    adc_selected: ReadPure<u32>, //     0x68
+    rtc_ctrl: ReadPureWrite<u32>, //    0x6c
+    rtc_div: ReadPureWrite<u32>, //     0x70
+    rtc_selected: ReadPure<u32>, //     0x74
+    sys_resus_ctrl: ReadPureWrite<u32>, // 0x78
+    sys_resus_status: ReadWrite<u32>, // 0x7c
 }
 
 mod gpout_ctrl_register {
@@ -238,10 +239,16 @@ impl Clocks {
         while field!(self.registers, sys_selected).read() & Self::clock_bitmap(sys_ctrl_register::SRC_SYS_AUX, sys_ctrl_register::SRC_SHIFT) == 0 {}
         // peripheral clock
         field!(self.clear_reg, peri_ctrl).write(peri_ctrl_register::ENABLE_MASK);
-        wait::wait_cycles(33);
+        wait::wait_cycles(36);
         field!(self.registers, peri_ctrl).write(peri_ctrl_register::AUXSRC_XOSC);
         field!(self.set_reg, peri_ctrl).write(peri_ctrl_register::ENABLE_MASK);
-        wait::wait_cycles(33);
+        wait::wait_cycles(36);
+        // ADC clock
+        field!(self.clear_reg, adc_ctrl).write(ctrl_register::ENABLE_MASK);
+        wait::wait_cycles(36);
+        field!(self.registers, adc_ctrl).write(ctrl_register::AUXSRC_PLL_USB);
+        field!(self.set_reg, adc_ctrl).write(ctrl_register::ENABLE_MASK);
+        wait::wait_cycles(36);
     }
 }
 

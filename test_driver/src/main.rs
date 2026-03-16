@@ -6,7 +6,7 @@
 
 use core::{fmt::{self, Write}, intrinsics::abort, panic::PanicInfo};
 
-use small_os_lib::send_empty;
+use small_os_lib::{send, send_empty};
 
 
 /// panic handler
@@ -56,6 +56,24 @@ pub fn _print(args: fmt::Arguments) {
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     loop {
-        println!("This is test proc!\r");
+        let mut temp_buffer = [0; 2];
+        send(1, 2, &mut temp_buffer, 0, 2).unwrap();
+        let temp = u16::from_le_bytes(temp_buffer);
+        if temp & 1 == 0 {
+            // based of https://microcontrollerslab.com/raspberry-pi-pico-adc-tutorial/ accessed
+            // 16/03/2026 where it was mentioned the entire level between 0 and 2 ^ 12 - 1 
+            // corresponds to 0V to 3.3V
+            let temp = temp >> 1;
+            let temp = ((temp as u32) * 1650) / 2048;
+            let temp = (temp as i16) - 500;
+            let frac = temp % 10;
+            let frac = if frac < 0 {
+                (-frac) as u8
+            } else {
+                frac as u8
+            };
+            let int = temp / 10;
+            println!("This is test proc! ({}.{}C)\r", int, frac);
+        }
     }
 }

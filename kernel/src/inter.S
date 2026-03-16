@@ -12,16 +12,15 @@
 .type _sys_pend, "function"
 .globl _sys_tick
 .type _sys_tick, "function"
-.globl _timer_irq
-.type _timer_irq, "function"
 
-.globl _irq_entry
-.type _irq_entry, "function"
+.globl _irq
+.type _irq, "function"
 
 .globl _proc_switch
 .type _proc_switch, "function"
 
-.type exit_exception, "function"
+.global idle
+.type idle, "function"
 
 .globl _start
 .type _start, "function"
@@ -101,9 +100,15 @@ _nmi:
 2:
     movs r0, r0
     bne 3f
-    wfi
-    bl do_proc_switch
-    b 2b
+    // make thread mode privileged
+    mrs r0, control
+    movs r2, #1
+    bics r0, r2
+    msr control, r0
+    isb
+    // return to thread mode using main stack (idle)
+    ldr r0, =0xfffffff9
+    bx r0
 3:
     bl schedule
 
@@ -119,9 +124,15 @@ _hard_fault:
 2:
     movs r0, r0
     bne 3f
-    wfi
-    bl do_proc_switch
-    b 2b
+    // make thread mode privileged
+    mrs r0, control
+    movs r2, #1
+    bics r0, r2
+    msr control, r0
+    isb
+    // return to thread mode using main stack (idle)
+    ldr r0, =0xfffffff9
+    bx r0
 3:
     bl schedule
 
@@ -147,19 +158,30 @@ _sys_call:
     mrs r1, psp
     // save stack pointer
     str r1, [r0]
-    mov r7, r1
     // first argument stack
     mov r0, r1
     bl sys_call
     // if got null pointer (no process) wait for an interrupt and try again
 2:
     movs r0, r0
-    bne 3f
-    wfi
-    bl do_proc_switch
-    b 2b
+    bne 4f
 3:
+    // make thread mode privileged
+    mrs r0, control
+    movs r2, #1
+    bics r0, r2
+    msr control, r0
+    isb
+    // return to thread mode using main stack (idle)
+    ldr r0, =0xfffffff9
+    bx r0
+4:
     bl schedule
+
+idle:
+1:
+    wfi
+    b 1b
 
 _sys_pend:
     // pause system tick
@@ -185,64 +207,64 @@ _sys_pend:
 1:
     bl pend_sv
     // if got null pointer (no process) wait for an interrupt and try again
-2:
     movs r0, r0
     bne 3f
-    wfi
-    bl do_proc_switch
-    b 2b
+2:
+    // make thread mode privileged
+    mrs r0, control
+    movs r2, #1
+    bics r0, r2
+    msr control, r0
+    isb
+    // return to thread mode using main stack (idle)
+    ldr r0, =0xfffffff9
+    bx r0
 3:
     bl schedule
 
-// r0:
-// bit pattern of
-// - [0]: 1
-// - [1]: 0 -> privileged mode, 1 -> unpriveleged mode
-// - [2]: 0 -> main stack, 1 -> process stack
-// - [3]: 0 -> handle mode, 1 -> thread mode
-// the state of the stack must be the same as on exception entry
-exit_exception:
-    movs r2, #2
-    mov r3, r2
-    // get privileged bit
-    ands r3, r0
-    lsrs r3, #1
-    mrs r1, control
-    movs r4, #1
-    // write back priveleged bit
-    bics r1, r4
-    orrs r1, r3
-    msr control, r1
-    isb
-    // setup pc to return from IRQ and return
-    mvns r2, r2
-    ands r0, r2
-    ldr r1, =0xfffffff0
-    orrs r1, r0
-    bx r1
-
-_irq_entry:
-    // get last 4 bits of lr (will be 1, 9 or d and be used to return to correct privileges after)
-    movs r1, #0xf
-    mov r0, lr
-    ands r1, r0
-    // get privileged bit and add into r0
-    mrs r0, control
-    movs r2, #1
-    ands r0, r2
-    lsls r0, #1
-    orrs r1, r0
-    push {r1}
+_irq:
+    // pause sys tick
     bl pause_sys_tick
-    // get interrupt number
+    // get current process
+    bl get_current_proc
+    // check if currently running a process and if so, save the state
+    movs r0, r0
+    beq 2f // if not running a process, don't need to save
+    // save current process codes
+    bl update_codes
+    // store unsaved process registers (r4 to r11)
+    stm r0!, {r4-r7}
+    mov r4, r8
+    mov r5, r9
+    mov r6, r10
+    mov r7, r11
+    stm r0!, {r4-r7}
+    adds r0, #4 // increment after pid
+    mrs r1, psp
+    // save stack pointer
+    str r1, [r0]
+2:
+    // first argument IRQ number
     mrs r0, ipsr
-    movs r3, #0x1f
-    ands r0, r3
+    movs r1, #0x3f
+    ands r0, r1
     subs r0, #16
     bl irq_handler
-    bl start_sys_tick
-    pop {r0}
-    b exit_exception
+    // if got null pointer (no process) wait for an interrupt and try again
+    movs r0, r0
+    bne 4f
+3:
+    // make thread mode privileged
+    mrs r0, control
+    movs r2, #1
+    bics r0, r2
+    msr control, r0
+    isb
+    // return to thread mode using main stack (idle)
+    ldr r0, =0xfffffff9
+    bx r0
+4:
+    bl schedule
 
 _proc_switch:
     // pause system tick
@@ -268,11 +290,17 @@ _proc_switch:
 1:
     bl sys_tick
     // if got null pointer (no process) wait for an interrupt and try again
-2:
     movs r0, r0
     bne 3f
-    wfi
-    bl do_proc_switch
-    b 2b
+2:
+    // make thread mode privileged
+    mrs r0, control
+    movs r2, #1
+    bics r0, r2
+    msr control, r0
+    isb
+    // return to thread mode using main stack (idle)
+    ldr r0, =0xfffffff9
+    bx r0
 3:
     bl schedule

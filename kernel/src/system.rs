@@ -100,6 +100,13 @@ impl System {
     }
 
     #[inline(always)]
+    pub fn set_svc_priorities(&mut self) {
+        // set sys call and sys pend priroities to 1 (after IRQ and sys tick)
+        field!(self.registers, sys_handler_priority2).write(1 << 30);
+        field!(self.registers, sys_handler_priority3).write(1 << 22);
+    }
+
+    #[inline(always)]
     pub fn send_pend(&mut self) {
         field!(self.registers, inter_ctrl_state).write(inter_ctrl_state_register::PEND_SV_SET_MASK);
     }

@@ -296,7 +296,6 @@ impl Scheduler {
             if proc.get_state() == ProcState::BlockedIRQ {
                 // fine to unwrap as this should be one of this processes IRQs
                 _ = proc.set_r0(proc.index_irq(irq as u8).unwrap() as u32);
-                proc.set_state(ProcState::Running);
                 unsafe {
                     self.schedule_internal(proc);
                 }
@@ -331,7 +330,10 @@ impl Scheduler {
         };
         if endpoint < program.num_sync_endpoints {
             // check access permissions
-            current.check_access(data.addr() as u32, len, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
+            let send_len = len & 0xffff;
+            let reply_len = (len >> 16) & 0xffff;
+            current.check_access(data.addr() as u32, send_len, AccessAttr::new(true, false, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
+            current.check_access(data.addr() as u32, reply_len, AccessAttr::new(false, true, false)).map_err(|_| QueueError::InvalidMemoryAccess)?;
             let queue = unsafe {
                 &mut **program.sync_endpoints.add(endpoint as usize)
             };

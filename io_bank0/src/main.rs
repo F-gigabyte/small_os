@@ -3,10 +3,9 @@
 #![no_std]
 #![no_main]
 
-use core::{intrinsics::abort, panic::PanicInfo, ptr::{self, NonNull}};
+use core::{intrinsics::abort, panic::PanicInfo, ptr::{self}};
 
-use safe_mmio::{UniqueMmioPointer, field, fields::ReadPureWrite};
-use small_os_lib::{QueueError, check_critical, read_header, receive, reply_empty, send};
+use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, read_header, receive, reply_empty, send};
 
 mod gpio_ctrl_register {
     pub const FUNCSEL_SHIFT: usize = 0;
@@ -86,6 +85,15 @@ pub enum IOBank0ReplyError {
     InvalidReplyBuffer
 }
 
+impl From<HeaderError> for IOBank0ReplyError {
+    fn from(value: HeaderError) -> Self {
+        match value {
+            HeaderError::InvalidReplyBuffer => Self::InvalidReplyBuffer,
+            HeaderError::InvalidSendBuffer => Self::InvalidSendBuffer
+        }
+    }
+}
+
 impl From<IOBank0ReplyError> for u32 {
     fn from(value: IOBank0ReplyError) -> Self {
         match value {
@@ -115,6 +123,12 @@ impl From<QueueError> for IOBank0Error {
     }
 }
 
+impl From<HeaderError> for IOBank0Error {
+    fn from(value: HeaderError) -> Self {
+        Self::from(IOBank0ReplyError::from(value))
+    }
+}
+
 pub struct Request {
     gpio: u8,
     func: u8
@@ -127,12 +141,7 @@ impl Request {
             return Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidGPIO));
         }
         let gpio = header.tag as u8;
-        if header.send_len != 1 {
-            return Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidSendBuffer));
-        }
-        if header.reply_len != 0 {
-            return Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidReplyBuffer));
-        }
+        check_header_len(&header, 1, 0)?;
         let mut buffer = [0; 1];
         _ = receive(0, &mut buffer)?;
         let mut func = buffer[0];
@@ -162,8 +171,7 @@ const RESET_IO_BANK0: u32 = 5;
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
 pub extern "C" fn main(io_bank0_base: usize) {
-    // reset io bank 0
-    send(RESET_QUEUE, RESET_IO_BANK0, &mut [], 0, 0).unwrap();
+    // don't reset IO Bank 0 as reset by kernel
     let mut io_bank0 = unsafe {
         IOBank0::new(io_bank0_base)
     };

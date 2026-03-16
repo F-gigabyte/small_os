@@ -82,13 +82,38 @@ impl PLL {
         field!(self.registers, prim).write(prim);
         field!(self.clear_reg, power).write(power_register::POSTDIVPD_MASK);
     }
+    
+    pub fn reset_usb(&mut self) {
+        let ref_div = 1 << cs_register::REF_DIV_SHIFT;
+        let fbdiv = 120 << fbdiv_int_register::VALUE_SHIFT;
+        let pd1 = 6 << prim_register::POSTDIV1_SHIFT;
+        let pd2 = 5 << prim_register::POSTDIV2_SHIFT;
+        let prim = pd1 | pd2;
+        if field!(self.registers, cs).read() & cs_register::LOCK_MASK != 0 && 
+            field!(self.registers, cs).read() & cs_register::REF_DIV_MASK == ref_div && 
+            field!(self.registers, fbdiv_int).read() & fbdiv_int_register::VALUE_MASK == fbdiv && 
+            field!(self.registers, prim).read() & (prim_register::POSTDIV1_MASK | prim_register::POSTDIV2_MASK) == prim {
+                return;
+        }
+        field!(self.registers, cs).write(ref_div);
+        field!(self.registers, fbdiv_int).write(fbdiv);
+        field!(self.clear_reg, power).write(power_register::PD_MASK | power_register::VCOPD_MASK);
+        while field!(self.registers, cs).read() & cs_register::LOCK_MASK == 0 {}
+        field!(self.registers, prim).write(prim);
+        field!(self.clear_reg, power).write(power_register::POSTDIVPD_MASK);
+    }
 }
 
 unsafe impl Send for PLL {}
 unsafe impl Sync for PLL {}
 
-static PLL_BASE: usize = 0x40028000;
+static PLL_SYS_BASE: usize = 0x40028000;
+static PLL_USB_BASE: usize = 0x4002c000;
 
-pub static PLL: SpinIRQ<PLL> = unsafe {
-    SpinIRQ::new(PLL::new(PLL_BASE))
+pub static PLL_SYS: SpinIRQ<PLL> = unsafe {
+    SpinIRQ::new(PLL::new(PLL_SYS_BASE))
+};
+
+pub static PLL_USB: SpinIRQ<PLL> = unsafe {
+    SpinIRQ::new(PLL::new(PLL_USB_BASE))
 };

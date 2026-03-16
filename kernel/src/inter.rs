@@ -242,14 +242,25 @@ pub extern "C" fn hard_fault(trace: *mut StackTrace, lr: u32) -> *mut Proc {
 /// registering to them and waiting for them to happen
 /// https://www.qnx.com/developers/docs/8.0/com.qnx.doc.neutrino.lib_ref/topic/i/interruptattachevent.html accessed 1/02/2026
 #[unsafe(no_mangle)]
-pub extern "C" fn irq_handler(irq: u8) {
+pub extern "C" fn irq_handler(irq: u8) -> *mut Proc {
     let cs = unsafe {
         CS::new()
     };
     let mut nvic = NVIC.lock(&cs);
     nvic.clear_pending_irq(irq);
     let mut scheduler = scheduler(&cs);
+    let prev = scheduler.get_current();
     scheduler.wake(irq);
+    nvic.disable_irq(irq);
+    // only switch out if current is blocked or its time slice expired
+    scheduler.next_current_process();
+    let current = scheduler.get_current();
+    // only reset time quantum if current process has switched
+    if prev != current {
+        let mut sys_tick = SYS_TICK.lock(&cs);
+        sys_tick.reload();
+    }
+    current
 }
 
 fn do_sys_call(sys_call: SysCall, cs: &CS) -> Result<(), u32> {

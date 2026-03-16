@@ -7,10 +7,12 @@ use crate::{mmio::{REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS}, mutex::SpinIRQ};
 mod reset_register {
     pub const IO_BANK0_SHIFT: usize = 5;
     pub const PLL_SYS_SHIFT: usize = 12;
+    pub const PLL_USB_SHIFT: usize = 13;
     pub const UART1_SHIFT: usize = 23;
 
     pub const IO_BANK0_MASK: u32 = 1 << IO_BANK0_SHIFT;
     pub const PLL_SYS_MASK: u32 = 1 << PLL_SYS_SHIFT;
+    pub const PLL_USB_MASK: u32 = 1 << PLL_USB_SHIFT;
     pub const UART1_MASK: u32 = 1 << UART1_SHIFT;
 }
 
@@ -59,6 +61,12 @@ impl Reset {
         field!(self.set_reg, reset).write(reset_register::PLL_SYS_MASK);
         field!(self.clear_reg, reset).write(reset_register::PLL_SYS_MASK);
         while field!(self.registers, reset_done).read() & reset_register::PLL_SYS_MASK == 0 {}
+    }
+    
+    pub fn reset_pll_usb(&mut self) {
+        field!(self.set_reg, reset).write(reset_register::PLL_USB_MASK);
+        field!(self.clear_reg, reset).write(reset_register::PLL_USB_MASK);
+        while field!(self.registers, reset_done).read() & reset_register::PLL_USB_MASK == 0 {}
     }
 
     pub fn reset_uart1(&mut self) {

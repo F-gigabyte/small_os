@@ -286,7 +286,6 @@ impl Region {
                 };
                 if !check_hamming_crc(symbols, region_mem, *crc) {
                     println!("Correcting errors");
-                    panic!("Panic");
                     if let Err(err) = correct_errors(symbols, region_mem) {
                         return Err(err);
                     }
@@ -679,7 +678,8 @@ impl Program {
                             error = false;
                             break;
                         } else {
-                            current_len -= end - current_len;
+                            println!("current len 0x{:x}, end 0x{:x}, start 0x{:x}, current addr 0x{:x}", current_len, end, start, current_addr);
+                            current_len -= end - current_addr;
                             current_addr = end;
                             error = false;
                             break;

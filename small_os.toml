@@ -12,7 +12,7 @@ debug_src = "target/thumbv6m-none-eabi/debug/test_driver"
 release_src = "target/thumbv6m-none-eabi/release/test_driver"
 num_sync_queues = 0
 async_queues = []
-sync_endpoints = [{ name = "uart", queue = 0 }]
+sync_endpoints = [{ name = "uart", queue = 0 }, { name = "adc", queue = 0 }]
 async_endpoints = []
 block_len = 247
 
@@ -49,5 +49,29 @@ release_src = "target/thumbv6m-none-eabi/release/io_bank0"
 num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "reset", queue = 0 }]
+async_endpoints = []
+block_len = 247
+
+[[programs]]
+name = "pads_bank0"
+priority = 128
+driver = "IO Bank0 Pad"
+debug_src = "target/thumbv6m-none-eabi/debug/pads_bank0"
+release_src = "target/thumbv6m-none-eabi/release/pads_bank0"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "reset", queue = 0 }]
+async_endpoints = []
+block_len = 247
+
+[[programs]]
+name = "adc"
+priority = 128
+driver = "ADC"
+debug_src = "target/thumbv6m-none-eabi/debug/adc"
+release_src = "target/thumbv6m-none-eabi/release/adc"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "reset", queue = 0 }, { name = "pads_bank0", queue = 0 }]
 async_endpoints = []
 block_len = 247

@@ -14,7 +14,7 @@ use core::{panic::PanicInfo};
 
 use crate::scheduler::QUANTUM_MICROS;
 use crate::sys_tick::SYS_TICK;
-use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, mpu::MPU, mutex::{SpinIRQGuard, force_spinlock_unlock}, nvic::{NVIC, irqs}, pll::PLL, program::init_processes, reset::RESET, rosc::ROSC, system::SYSTEM, timer::{TIMER, Timer, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
+use crate::{clocks::CLOCKS, inter::{CS, disable_irq, enable_irq}, io_bank0::IOBANK0, mpu::MPU, mutex::{SpinIRQGuard, force_spinlock_unlock}, nvic::{NVIC, irqs}, pll::{PLL_SYS, PLL_USB}, program::init_processes, reset::RESET, rosc::ROSC, system::SYSTEM, timer::{TIMER, Timer, TimerIRQ}, uart::UART1, watchdog::WATCHDOG, xosc::XOSC};
 
 pub mod uart;
 pub mod reset;
@@ -42,6 +42,7 @@ pub mod mpu;
 
 unsafe extern "C" {
     static __stack: u8;
+    fn idle() -> !;
 }
 
 /// panic handler
@@ -103,8 +104,11 @@ pub extern "C" fn main() -> ! {
         xosc.reset();
         clocks.preinit_sys_ref();
         reset.reset_pll_sys();
-        let mut pll = PLL.lock(&cs);
-        pll.reset_sys();
+        reset.reset_pll_usb();
+        let mut pll_sys = PLL_SYS.lock(&cs);
+        pll_sys.reset_sys();
+        let mut pll_usb = PLL_USB.lock(&cs);
+        pll_usb.reset_usb();
         clocks.setup_clocks();
         let mut rosc = ROSC.lock(&cs);
         rosc.disable();
@@ -124,8 +128,6 @@ pub extern "C" fn main() -> ! {
         let mut sys_tick = SYS_TICK.lock(&cs);
         sys_tick.set_timeout(QUANTUM_MICROS);
         sys_tick.init();
-        let mut nvic = NVIC.lock(&cs);
-        nvic.enable_irq(irqs::TIMER0);
         let mut mpu = MPU.lock(&cs);
         mpu.init();
         {
@@ -136,12 +138,12 @@ pub extern "C" fn main() -> ! {
         let mut sys = SYSTEM.lock(&cs);
         sys.send_pend();
     }
+    #[cfg(test)]
+    test_main();
     // SAFETY
     // IRQ has been setup and can now run
     unsafe {
         enable_irq();
+        idle();
     }
-    #[cfg(test)]
-    test_main();
-    loop {}
 }
