@@ -63,6 +63,7 @@ pub enum KPutError {
 #[derive(Debug, Clone)]
 pub struct AsyncHeader {
     pub pid: u32,
+    pub driver: u32,
     pub tag: u32,
     pub message_len: u32
 }
@@ -70,6 +71,7 @@ pub struct AsyncHeader {
 #[derive(Debug, Clone)]
 pub struct SyncHeader {
     pub pid: u32,
+    pub driver: u32,
     pub tag: u32,
     pub send_len: u16,
     pub reply_len: u16
@@ -206,6 +208,7 @@ pub fn send_async(target: u32, tag: u32, data: &[u8]) -> Result<(), QueueError> 
 pub fn read_header(queue: u32) -> Result<SyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
+    let mut driver: u32;
     let mut tag: u32;
     let mut len: u32;
     unsafe {
@@ -216,13 +219,14 @@ pub fn read_header(queue: u32) -> Result<SyncHeader, QueueError> {
             num = in(reg) 5,
             res = out(reg) res,
             inout("r0") queue => pid,
-            out("r1") tag,
-            out("r2") len,
+            out("r1") driver,
+            out("r2") tag,
+            out("r3") len,
         );
     }
     let send_len = (len & 0xffff) as u16;
     let reply_len = ((len >> 16) & 0xffff) as u16;
-    decode_queue_res(res).map(|_| SyncHeader { pid, tag, send_len, reply_len })
+    decode_queue_res(res).map(|_| SyncHeader { pid, driver, tag, send_len, reply_len })
 }
 
 pub fn next_valid_header(queue: u32, invalid_response: u32) -> Result<SyncHeader, QueueError> {
@@ -277,6 +281,7 @@ pub fn next_message(queue: u32, buffer: &mut[u8], invalid_response: u32, too_lar
 pub fn read_header_async(queue: u32) -> Result<AsyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
+    let mut driver: u32;
     let mut tag: u32;
     let mut len: u32;
     unsafe {
@@ -287,16 +292,18 @@ pub fn read_header_async(queue: u32) -> Result<AsyncHeader, QueueError> {
             num = in(reg) 6,
             res = out(reg) res,
             inout("r0") queue => pid,
-            out("r1") tag,
-            out("r2") len,
+            out("r1") driver,
+            out("r2") tag,
+            out("r3") len,
         );
     }
-    decode_queue_res(res).map(|_| AsyncHeader { pid, tag, message_len: len })
+    decode_queue_res(res).map(|_| AsyncHeader { pid, driver, tag, message_len: len })
 }
 
 pub fn read_header_non_blocking(queue: u32) -> Result<SyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
+    let mut driver: u32;
     let mut tag: u32;
     let mut len: u32;
     unsafe {
@@ -307,18 +314,20 @@ pub fn read_header_non_blocking(queue: u32) -> Result<SyncHeader, QueueError> {
             num = in(reg) 7,
             res = out(reg) res,
             inout("r0") queue => pid,
-            out("r1") tag,
-            out("r2") len,
+            out("r1") driver,
+            out("r2") tag,
+            out("r3") len,
         );
     }
     let send_len = (len & 0xffff) as u16;
     let reply_len = ((len >> 16) & 0xffff) as u16;
-    decode_queue_res(res).map(|_| SyncHeader { pid, tag, send_len, reply_len })
+    decode_queue_res(res).map(|_| SyncHeader { pid, driver, tag, send_len, reply_len })
 }
 
 pub fn read_header_async_non_blocking(queue: u32) -> Result<AsyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
+    let mut driver: u32;
     let mut tag: u32;
     let mut len: u32;
     unsafe {
@@ -329,11 +338,12 @@ pub fn read_header_async_non_blocking(queue: u32) -> Result<AsyncHeader, QueueEr
             num = in(reg) 8,
             res = out(reg) res,
             inout("r0") queue => pid,
-            out("r1") tag,
-            out("r2") len,
+            out("r1") driver,
+            out("r2") tag,
+            out("r3") len,
         );
     }
-    decode_queue_res(res).map(|_| AsyncHeader { pid, tag, message_len: len })
+    decode_queue_res(res).map(|_| AsyncHeader { pid, driver, tag, message_len: len })
 }
 
 pub fn receive(queue: u32, buffer: &mut[u8]) -> Result<usize, QueueError> {

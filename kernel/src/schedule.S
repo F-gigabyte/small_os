@@ -14,7 +14,7 @@ schedule:
     bl start_sys_tick
     pop {r0}
     // set r1 to process stack pointer
-    ldr r1, [r0, #0x24]
+    ldr r1, [r0, #0x20]
     // r4
     ldr r4, [r0, #0x0]
     // r5

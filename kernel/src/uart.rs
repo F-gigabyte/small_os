@@ -206,8 +206,10 @@ impl UART {
 
         // set baud rate to 115200
         // integer baud rate should be 6 and fractional should be 33 for a 12MHz clock
-        field!(self.registers, int_baud).write((6 << int_baud_rate_register::BAUD_DIVINT_SHIFT) & int_baud_rate_register::BAUD_DIVINT_MASK);
-        field!(self.registers, frac_baud).write((33 << frac_baud_rate_register::BAUD_DIVFRAC_SHIFT) & frac_baud_rate_register::BAUD_DIVFRAC_MASK);
+        //field!(self.registers, int_baud).write((6 << int_baud_rate_register::BAUD_DIVINT_SHIFT) & int_baud_rate_register::BAUD_DIVINT_MASK);
+        //field!(self.registers, frac_baud).write((33 << frac_baud_rate_register::BAUD_DIVFRAC_SHIFT) & frac_baud_rate_register::BAUD_DIVFRAC_MASK);
+        field!(self.registers, int_baud).write((69 << int_baud_rate_register::BAUD_DIVINT_SHIFT) & int_baud_rate_register::BAUD_DIVINT_MASK);
+        field!(self.registers, frac_baud).write((28 << frac_baud_rate_register::BAUD_DIVFRAC_SHIFT) & frac_baud_rate_register::BAUD_DIVFRAC_MASK);
         field!(self.registers, line_ctrl).write(line_ctrl_register::FEN_MASK | line_ctrl_register::WLEN_8);
         // mask all interrupts (no interrupts will be generated)
         field!(self.registers, mask_set_clr).write(interrupt_register::ALL_MASK);

@@ -23,9 +23,17 @@ pub enum RegionAttr {
 }
 
 unsafe extern "C" {
-    static mut __program_table: u8;
-    static __procs_virt_start: u8;
-    static __procs_virt_end: u8;
+    static mut __program_table: u32;
+    static __procs_virt_start: u32;
+    static __procs_virt_end: u32;
+    pub static __args: DriverArgs;
+}
+
+#[repr(C)]
+pub struct DriverArgs {
+    pub pin_func: [u32; 4],
+    pub pads: [u32; 2],
+    pub resets: u32
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,7 +267,6 @@ impl Region {
             return Ok(());
         }
         if let Some(codes) = self.error_codes() {
-            let start = read_time();
             let block_len = block_len as usize;
             let blocks = (((self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>()) + block_len - 1) / block_len;
             let symbol_len = calc_symbol_len(block_len);
@@ -297,6 +304,39 @@ impl Region {
             }
         }
         Ok(())
+    }
+    
+    pub fn update_codes(&mut self, block_len: u32) {
+        if let Some(codes) = self.error_codes() {
+            let block_len = block_len as usize;
+            let blocks = (((self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>()) + block_len - 1) / block_len;
+            let symbol_len = calc_symbol_len(block_len);
+            let region_mem_len = (self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>();
+            let code_len = symbol_len + 1; // + 1 for CRC
+            let mem_ptr: *mut u32 = ptr::with_exposed_provenance_mut(self.get_virt().unwrap() as usize);
+            let codes_ptr: *mut u32 = ptr::with_exposed_provenance_mut(codes as usize);
+            for i in 0..blocks {
+                let mem_offset = block_len * i;
+                let region_len = if mem_offset + block_len <= region_mem_len {
+                    block_len
+                } else {
+                    region_mem_len - mem_offset
+                };
+                let current_symbol_len = calc_symbol_len(region_len);
+                let crc: &mut u32 = unsafe {
+                    &mut *codes_ptr.add(i * code_len + current_symbol_len)
+                };
+                let region_mem: &mut [u32] = unsafe {
+                    slice::from_raw_parts_mut(mem_ptr.add(mem_offset), region_len)
+                };
+                let symbols: &mut [u32] = unsafe {
+                    slice::from_raw_parts_mut(codes_ptr.add(i * code_len), current_symbol_len)
+                };
+                if !check_hamming_crc(symbols, region_mem, *crc) {
+                    *crc = calc_symbols(symbols, region_mem);
+                }
+            }
+        }
     }
     
     pub fn encode_codes(&mut self, block_len: u32) {
@@ -468,6 +508,7 @@ impl Region {
 
 #[repr(C)]
 pub struct Program {
+    pub pid: u32,
     pub flags: u32,
     pub inter: [u8; 4],
     pub sp: u32,
@@ -481,7 +522,8 @@ pub struct Program {
     pub num_async_endpoints: u32,
     pub async_queues: *mut AsyncMessageQueue,
     pub async_endpoints: *const *mut AsyncMessageQueue,
-    pub block_len: u32
+    pub block_len: u32,
+    pub pin_mask: u32
 }
 
 impl Program {
@@ -639,7 +681,7 @@ impl Program {
     pub fn update_codes(&mut self) {
         for region in &mut self.regions {
             if region.enabled() {
-                region.encode_codes(self.block_len);
+                region.update_codes(self.block_len);
             }
         }
     }
@@ -725,10 +767,10 @@ impl ProgramTable {
 /// this function is non-reentrant
 pub unsafe fn init_processes(cs: &CS) {
     let num_programs: u32 = unsafe {
-        *ptr::with_exposed_provenance((&raw const __program_table) as usize)
+        *&raw const __program_table
     };
     let programs: &mut[Program] = unsafe {
-        slice::from_raw_parts_mut(ptr::without_provenance_mut(((&raw mut __program_table) as usize) + 4), num_programs as usize)
+        slice::from_raw_parts_mut((&raw mut __program_table).add(1) as *mut Program, num_programs as usize)
     };
     let mut scheduler = scheduler(&cs);
     let procs_start = &raw const __procs_virt_start as usize;
@@ -738,7 +780,6 @@ pub unsafe fn init_processes(cs: &CS) {
         slice::from_raw_parts_mut(ptr::with_exposed_provenance_mut(procs_start), len)
     };
     scheduler.init(processes);
-    let mut current_pid = 0;
     let mut current_driver = 0;
     for program in programs {
         println!("Driver {}", program.driver());
@@ -795,15 +836,40 @@ pub unsafe fn init_processes(cs: &CS) {
         println!("Entry: 0x{:x}", program.entry);
         println!("Stack Region: {}", program.sp);
         let driver = program.driver() as usize;
-        let r0 = if driver != 0 {
-            program.regions[0].get_runtime_addr().unwrap()
-        } else {
-            0
+        let mut args = [0; 7];
+        let kernel_args = unsafe {
+            &__args
         };
+        let mut arg_len = 0;
+        if driver != 0 {
+            args[arg_len + 1] = program.regions[0].get_runtime_addr().unwrap();
+            arg_len += 1;
+            if driver == 6 {
+                // IO Bank 0
+                args[arg_len + 1] = kernel_args.pin_func[0];
+                args[arg_len + 2] = kernel_args.pin_func[1];
+                args[arg_len + 3] = kernel_args.pin_func[2];
+                args[arg_len + 4] = kernel_args.pin_func[3];
+                arg_len += 4;
+            } else if driver == 8 {
+                // Pads bank 0
+                args[arg_len + 1] = kernel_args.pads[0];
+                args[arg_len + 2] = kernel_args.pads[1];
+                arg_len += 2;
+            } else if driver == 27 {
+                // Resets
+                args[arg_len + 1] = kernel_args.resets;
+                arg_len += 1;
+            }
+        }
+        if program.pin_mask != 0 {
+            args[arg_len + 1] = program.pin_mask;
+            arg_len += 1;
+        }
+        args[0] = arg_len as u32;
         let pid = unsafe {
-            scheduler.create_proc(current_pid, program, r0).unwrap()
+            scheduler.create_proc(program, &args[..arg_len + 1]).unwrap()
         };
         scheduler.schedule_process(pid).unwrap();
-        current_pid += 1;
     }
 }

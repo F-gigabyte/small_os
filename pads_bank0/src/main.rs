@@ -3,9 +3,9 @@
 #![no_std]
 #![no_main]
 
-use core::{intrinsics::abort, panic::PanicInfo, ptr};
+use core::{intrinsics::abort, panic::PanicInfo, ptr, slice};
 
-use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, read_header, receive, reply_empty};
+use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, read_header, receive, reply_empty, send_empty};
 
 mod voltage_register {
     pub const VOLTAGE_SHIFT: usize = 0;
@@ -96,13 +96,8 @@ impl From<HeaderError> for PadsBank0Error {
 }
 
 pub struct PadsBank0 {
-    registers: *mut u32
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Voltage {
-    Voltage1V8,
-    Voltage3V3
+    registers: *mut u32,
+    pads: [u32; 2]
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -112,14 +107,9 @@ pub enum GPIOType {
     Analog
 }
 
-pub struct GPIORequest {
-    gpio: u8,
-    gpio_type: GPIOType
-}
-
 pub enum Request {
-    GPIO(GPIORequest),
-    Voltage(Voltage)
+    Finished,
+    ResetGPIO(u8)
 }
 
 impl Request {
@@ -127,62 +117,76 @@ impl Request {
         let header = read_header(0)?;
         match header.tag {
             0 => {
-                // GPIO request
-                check_header_len(&header, 2, 0)?;
-                let mut buffer = [0; 2];
-                _ = receive(0, &mut buffer)?;
-                let gpio = buffer[0];
-                let gpio_type = buffer[1];
-                if gpio > MAX_GPIO {
-                    return Err(PadsBank0Error::ReplyError(PadsBank0ReplyError::InvalidGPIO));
-                }
-                let gpio_type = match gpio_type {
-                    0 => GPIOType::Input,
-                    1 => GPIOType::Output,
-                    2 => GPIOType::Analog,
-                    _ => {
-                        return Err(PadsBank0Error::ReplyError(PadsBank0ReplyError::InvalidGPIOType));
-                    }
-                };
-                Ok(Self::GPIO(
-                    GPIORequest { 
-                        gpio, 
-                        gpio_type 
-                    }
-                ))
+                // Finished request
+                check_header_len(&header, 0, 0)?;
+                Ok(Self::Finished)
             },
             1 => {
-                // Voltage request
+                // GPIO request
                 check_header_len(&header, 1, 0)?;
                 let mut buffer = [0; 1];
                 _ = receive(0, &mut buffer)?;
-                let voltage = buffer[0];
-                let voltage = match voltage {
-                    0 => Voltage::Voltage3V3,
-                    1 => Voltage::Voltage1V8,
-                    _ => {
-                        return Err(PadsBank0Error::ReplyError(PadsBank0ReplyError::InvalidVoltage));
-                    }
-                };
-                Ok(Self::Voltage(voltage))
+                let gpio = buffer[0];
+                if gpio > MAX_GPIO {
+                    return Err(PadsBank0Error::ReplyError(PadsBank0ReplyError::InvalidGPIO));
+                }
+                Ok(Self::ResetGPIO(gpio))
             },
-            _ => {
-                return Err(PadsBank0Error::ReplyError(PadsBank0ReplyError::InvalidRequest));
-            }
+            _ => Err(PadsBank0Error::ReplyError(PadsBank0ReplyError::InvalidRequest)),
         }
     }
 }
 
 pub const MAX_GPIO: u8 = 31;
 
+pub enum GPIOState {
+    Disable = 0,
+    Normal = 1,
+    Analog = 2
+}
+
+impl TryFrom<u8> for GPIOState {
+    type Error = u8;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Disable),
+            1 => Ok(Self::Normal),
+            2 => Ok(Self::Analog),
+            _ => Err(value)
+        }
+    }
+}
+
 impl PadsBank0 {
-    const unsafe fn new(base: usize) -> Self {
-        Self {
-            registers: ptr::with_exposed_provenance_mut(base)
+    unsafe fn new(base: usize, pads0: u32, pads1: u32) -> Self {
+        let mut res = Self {
+            registers: ptr::with_exposed_provenance_mut(base),
+            pads: [pads0, pads1]
+        };
+        for i in 0..30 {
+            res.reset_gpio(i as u8);
+        }
+        res
+    }
+
+    pub fn reset_gpio(&mut self, gpio: u8) {
+        assert!(gpio <= MAX_GPIO);
+        let index = (gpio / 16) as usize;
+        let shift = (gpio % 16) * 2;
+        self.set_gpio(gpio, GPIOState::try_from(((self.pads[index] >> shift) & 0x3) as u8).unwrap());
+    }
+
+    pub fn set_gpio(&mut self, gpio: u8, gpio_state: GPIOState) {
+        assert!(gpio <= MAX_GPIO);
+        match gpio_state {
+            GPIOState::Disable => self.disable_gpio(gpio),
+            GPIOState::Normal => self.set_gpio_normal(gpio),
+            GPIOState::Analog => self.set_gpio_analog(gpio),
         }
     }
 
-    pub fn set_gpio_output(&mut self, gpio: u8) {
+    pub fn set_gpio_normal(&mut self, gpio: u8) {
         assert!(gpio <= MAX_GPIO);
         let pad_ptr = unsafe {
             self.registers.add((gpio as usize) + 1)
@@ -190,21 +194,6 @@ impl PadsBank0 {
         let val = gpio_register::DRIVE_4MA | 
             gpio_register::PULL_DOWN_ENABLE_MASK | 
             gpio_register::INPUT_ENABLE_MASK |
-            gpio_register::SCHMITT_MASK;
-        unsafe {
-            pad_ptr.write_volatile(val);
-        }
-    }
-
-    pub fn set_gpio_input(&mut self, gpio: u8) {
-        assert!(gpio < MAX_GPIO);
-        let pad_ptr = unsafe {
-            self.registers.add((gpio as usize) + 1)
-        };
-        let val = gpio_register::DRIVE_4MA | 
-            gpio_register::PULL_DOWN_ENABLE_MASK | 
-            gpio_register::INPUT_ENABLE_MASK |
-            gpio_register::OUTPUT_DISABLE_MASK |
             gpio_register::SCHMITT_MASK;
         unsafe {
             pad_ptr.write_volatile(val);
@@ -225,16 +214,14 @@ impl PadsBank0 {
         }
     }
 
-    pub fn set_voltage(&mut self, voltage: Voltage) {
-        let voltage = match voltage {
-            Voltage::Voltage1V8 => voltage_register::VOLTAGE_1V8,
-            Voltage::Voltage3V3 => voltage_register::VOLTAGE_3V3
+    pub fn disable_gpio(&mut self, gpio: u8) {
+        assert!(gpio < MAX_GPIO);
+        let pad_ptr = unsafe {
+            self.registers.add((gpio as usize) + 1)
         };
-        let volt_ptr = unsafe {
-            self.registers.add(1)
-        };
+        let val = 0; 
         unsafe {
-            volt_ptr.write_volatile(voltage);
+            pad_ptr.write_volatile(val);
         }
     }
 }
@@ -246,33 +233,24 @@ fn panic(_info: &PanicInfo) -> ! {
     abort()
 }
 
+const RESET_QUEUE: u32 = 0;
+
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main(pads_base: usize) {
+pub extern "C" fn main(num_args: usize, pads_base: usize, pads0: u32, pads1: u32) {
+    assert!(num_args == 3);
+    // check reset is done
+    send_empty(RESET_QUEUE, 0, &[]).unwrap();
     let mut pads = unsafe {
-        PadsBank0::new(pads_base)
+        PadsBank0::new(pads_base, pads0, pads1)
     };
     loop {
         match Request::parse() {
             Ok(request) => {
                 match request {
-                    Request::GPIO(gpio) => {
-                        match gpio.gpio_type {
-                            GPIOType::Input => {
-                                pads.set_gpio_input(gpio.gpio);
-                            },
-                            GPIOType::Output => {
-                                pads.set_gpio_output(gpio.gpio);
-                            },
-                            GPIOType::Analog => {
-                                pads.set_gpio_analog(gpio.gpio);
-                            }
-                        }
-                    },
-                    Request::Voltage(voltage) => {
-                        pads.set_voltage(voltage);
-                    }
+                    Request::Finished => {},
+                    Request::ResetGPIO(gpio) => pads.reset_gpio(gpio),
                 }
                 check_critical(reply_empty(0, 0)).unwrap_or(Ok(())).unwrap();
             },

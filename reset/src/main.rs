@@ -7,7 +7,7 @@ use core::{intrinsics::abort, panic::PanicInfo};
 use core::{ptr::{self, NonNull}};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadOnly, ReadPureWrite, WriteOnly}};
-use small_os_lib::{QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, do_yield, read_header, reply_empty};
+use small_os_lib::{HeaderError, QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, check_header_len, do_yield, read_header, reply_empty};
 
 #[repr(C)]
 struct ResetRegisters {
@@ -29,22 +29,41 @@ struct ResetSetRegisters {
 pub struct Reset {
     registers: UniqueMmioPointer<'static, ResetRegisters>,
     clear_reg: UniqueMmioPointer<'static, ResetClearRegisters>,
-    set_reg: UniqueMmioPointer<'static, ResetSetRegisters>
+    set_reg: UniqueMmioPointer<'static, ResetSetRegisters>,
+    bitmap: u32
 }
 
 impl Reset {
-    const unsafe fn new(base: usize) -> Self {
-        unsafe {
+    unsafe fn new(base: usize, bitmap: u32) -> Self {
+        let mut res = unsafe {
             Self {
                 registers: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base)).unwrap()),
                 clear_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_CLR_BITS)).unwrap()),
-                set_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_SET_BITS)).unwrap())
+                set_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_SET_BITS)).unwrap()),
+                bitmap
             }
+        };
+        res.reset_all();
+        res
+    }
+
+    pub fn reset_all(&mut self) {
+        // mask is all the devices that need reseting
+        let mask = (!field!(self.registers, reset).read()) & self.bitmap;
+        if mask != 0 {
+            // reset all masked devices not already reset
+            field!(self.set_reg, reset).write(mask);
+        }
+        // deassert reset on all masked devices
+        field!(self.clear_reg, reset).write(self.bitmap);
+        // wait until devices ready to be used
+        while field!(self.registers, reset_done).read() & self.bitmap != self.bitmap {
+            do_yield().unwrap();
         }
     }
 
-    pub fn handle_request(&mut self, request: &mut Request) {
-        let device = request.device as u32;
+    pub fn reset_device(&mut self, device: u8) {
+        assert!(device <= 24);
         let mask = 1 << device;
         if field!(self.registers, reset).read() & mask == 0 {
             field!(self.set_reg, reset).write(mask);
@@ -65,18 +84,29 @@ fn panic(_info: &PanicInfo) -> ! {
 
 pub enum ResetReplyError {
     SendError,
+    InvalidRequest,
     InvalidDevice,
     InvalidSendBuffer,
     InvalidReplyBuffer
+}
+
+impl From<HeaderError> for ResetReplyError {
+    fn from(value: HeaderError) -> Self {
+        match value {
+            HeaderError::InvalidSendBuffer => Self::InvalidSendBuffer,
+            HeaderError::InvalidReplyBuffer => Self::InvalidReplyBuffer
+        }
+    }
 }
 
 impl From<ResetReplyError> for u32 {
     fn from(value: ResetReplyError) -> Self {
         match value {
             ResetReplyError::SendError => 1,
-            ResetReplyError::InvalidDevice => 2,
-            ResetReplyError::InvalidSendBuffer => 3,
-            ResetReplyError::InvalidReplyBuffer => 4
+            ResetReplyError::InvalidRequest => 2,
+            ResetReplyError::InvalidDevice => 3,
+            ResetReplyError::InvalidSendBuffer => 4,
+            ResetReplyError::InvalidReplyBuffer => 5
         }
     }
 }
@@ -98,99 +128,72 @@ impl From<QueueError> for ResetError {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum ResetDevice {
-    ADC = 0,
-    BusCtrl = 1,
-    DMA = 2,
-    I2C0 = 3,
-    I2C1 = 4,
-    IOBank0 = 5,
-    IOQSPI = 6,
-    JTAG = 7,
-    PadsIOBank0 = 8,
-    PadsQSPI = 9,
-    PIO0 = 10,
-    PIO1 = 11,
-    PllSys = 12,
-    PllUSB = 13,
-    PWM = 14,
-    RTC = 15,
-    SPI0 = 16,
-    SPI1 = 17,
-    SysCfg = 18,
-    SysInfo = 19,
-    Timer = 21,
-    Uart0 = 22,
-    Uart1 = 23,
-    USBCtrl = 24
-}
-
-impl TryFrom<u32> for ResetDevice {
-    type Error = ResetReplyError;
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::ADC),
-            1 => Ok(Self::BusCtrl),
-            2 => Ok(Self::DMA),
-            3 => Ok(Self::I2C0),
-            4 => Ok(Self::I2C1),
-            5 => Ok(Self::IOBank0),
-            6 => Ok(Self::IOQSPI),
-            7 => Ok(Self::JTAG),
-            8 => Ok(Self::PadsIOBank0),
-            9 => Ok(Self::PadsQSPI),
-            10 => Ok(Self::PIO0),
-            11 => Ok(Self::PIO1),
-            12 => Ok(Self::PllSys),
-            13 => Ok(Self::PllUSB),
-            14 => Ok(Self::PWM),
-            15 => Ok(Self::RTC),
-            16 => Ok(Self::SPI0),
-            17 => Ok(Self::SPI1),
-            18 => Ok(Self::SysCfg),
-            19 => Ok(Self::SysInfo),
-            21 => Ok(Self::Timer),
-            22 => Ok(Self::Uart0),
-            23 => Ok(Self::Uart1),
-            24 => Ok(Self::USBCtrl),
-            _ => Err(ResetReplyError::InvalidDevice)
-        }
+impl From<HeaderError> for ResetError {
+    fn from(value: HeaderError) -> Self {
+        Self::from(ResetReplyError::from(value))
     }
 }
 
-pub struct Request {
-    device: ResetDevice
+pub enum Request {
+    Finished,
+    ResetDevice(u8)
 }
 
 impl Request {
-    pub fn parse() -> Result<Self, ResetError> {
+    pub fn parse(bitmap: u32) -> Result<Self, ResetError> {
         let header = read_header(0)?;
-        let device = ResetDevice::try_from(header.tag)?;
-        if header.reply_len != 0 {
-            return Err(ResetError::ReplyError(ResetReplyError::InvalidReplyBuffer));
+        match header.tag {
+            0 => {
+                // Finished request
+                check_header_len(&header, 0, 0)?;
+                Ok(Self::Finished)
+            },
+            1 => {
+                // Reset Device request
+                check_header_len(&header, 0, 0)?; 
+                if header.driver >= 1 && header.driver <= 22 {
+                    let extra_shift = if header.driver > 21 {
+                        // skip UART1, TBMAN and JTAG
+                        3
+                    } else if header.driver > 19 {
+                        // skip TBMAN and JTAG
+                        2
+                    } else if header.driver > 7 {
+                        // skip JTAG
+                        1
+                    } else {
+                        0
+                    };
+                    let device = (header.driver + extra_shift - 1) as u8;
+                    if (1 << device) & bitmap != 0 {
+                        Ok(Self::ResetDevice(device))
+                    } else {
+                        Err(ResetError::ReplyError(ResetReplyError::InvalidDevice))
+                    }
+                } else {
+                    Err(ResetError::ReplyError(ResetReplyError::InvalidDevice))
+                }
+            },
+            _ => Err(ResetError::ReplyError(ResetReplyError::InvalidRequest))
         }
-        if header.send_len != 0 {
-            return Err(ResetError::ReplyError(ResetReplyError::InvalidSendBuffer));
-        }
-        Ok(Self { 
-            device
-        })
     }
 }
 
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main(reset_base: usize) {
+pub extern "C" fn main(num_args: usize, reset_base: usize, bitmap: u32) {
+    assert!(num_args == 2);
     let mut reset = unsafe {
-        Reset::new(reset_base)
+        Reset::new(reset_base, bitmap)
     };
     loop {
-        match Request::parse() {
-            Ok(mut request) => {
-                reset.handle_request(&mut request);
+        match Request::parse(reset.bitmap) {
+            Ok(request) => {
+                match request {
+                    Request::Finished => {},
+                    Request::ResetDevice(device) => reset.reset_device(device),
+                }
                 check_critical(reply_empty(0, 0)).unwrap_or(Ok(())).unwrap();
             },
             Err(err) => {

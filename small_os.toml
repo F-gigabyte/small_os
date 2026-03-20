@@ -6,8 +6,7 @@ release_src = "target/thumbv6m-none-eabi/release/kernel"
 
 [[programs]]
 name = "test_driver"
-priority = 128
-driver = ""
+priority = 3
 debug_src = "target/thumbv6m-none-eabi/debug/test_driver"
 release_src = "target/thumbv6m-none-eabi/release/test_driver"
 num_sync_queues = 0
@@ -18,19 +17,20 @@ block_len = 247
 
 [[programs]]
 name = "uart"
-priority = 128
+priority = 3
 driver = "UART0"
+pins = [0, 1, 2, 3]
 debug_src = "target/thumbv6m-none-eabi/debug/uart"
 release_src = "target/thumbv6m-none-eabi/release/uart"
 num_sync_queues = 1
 async_queues = []
-sync_endpoints = [{ name = "reset", queue = 0 }, { name = "io_bank0", queue = 0 }]
+sync_endpoints = [{ name = "io_bank0", queue = 0 }]
 async_endpoints = []
 block_len = 247
 
 [[programs]]
 name = "reset"
-priority = 128
+priority = 3
 driver = "Subsystem Reset"
 debug_src = "target/thumbv6m-none-eabi/debug/reset"
 release_src = "target/thumbv6m-none-eabi/release/reset"
@@ -42,20 +42,20 @@ block_len = 247
 
 [[programs]]
 name = "io_bank0"
-priority = 128
+priority = 3
 driver = "IO Bank0"
 debug_src = "target/thumbv6m-none-eabi/debug/io_bank0"
 release_src = "target/thumbv6m-none-eabi/release/io_bank0"
 num_sync_queues = 1
 async_queues = []
-sync_endpoints = [{ name = "reset", queue = 0 }]
+sync_endpoints = [{ name = "reset", queue = 0 }, { name = "pads_bank0", queue = 0 }]
 async_endpoints = []
 block_len = 247
 
 [[programs]]
 name = "pads_bank0"
-priority = 128
-driver = "IO Bank0 Pad"
+priority = 3
+driver = "IO Bank0 Pads"
 debug_src = "target/thumbv6m-none-eabi/debug/pads_bank0"
 release_src = "target/thumbv6m-none-eabi/release/pads_bank0"
 num_sync_queues = 1
@@ -66,12 +66,39 @@ block_len = 247
 
 [[programs]]
 name = "adc"
-priority = 128
+priority = 3
 driver = "ADC"
+pins = [28]
 debug_src = "target/thumbv6m-none-eabi/debug/adc"
 release_src = "target/thumbv6m-none-eabi/release/adc"
 num_sync_queues = 1
 async_queues = []
-sync_endpoints = [{ name = "reset", queue = 0 }, { name = "pads_bank0", queue = 0 }]
+sync_endpoints = [{ name = "io_bank0", queue = 0 }]
+async_endpoints = []
+block_len = 247
+
+#[[programs]]
+#name = "sio"
+#priority = 3
+#driver = "SIO Proc 0"
+#pins = [16, 17, 18, 19]
+#debug_src = "target/thumbv6m-none-eabi/debug/sio"
+#release_src = "target/thumbv6m-none-eabi/release/sio"
+#num_sync_queues = 1
+#async_queues = []
+#sync_endpoints = [{ name = "io_bank0", queue = 0 }]
+#async_endpoints = []
+#block_len = 247
+
+[[programs]]
+name = "spi"
+priority = 0
+driver = "SPI0"
+pins = [16, 17, 18, 19]
+debug_src = "target/thumbv6m-none-eabi/debug/spi"
+release_src = "target/thumbv6m-none-eabi/release/spi"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "io_bank0", queue = 0 }]
 async_endpoints = []
 block_len = 247

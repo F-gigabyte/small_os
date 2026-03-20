@@ -54,10 +54,20 @@ pub fn _print(args: fmt::Arguments) {
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main() {
+pub extern "C" fn main(num_args: usize) {
+    assert!(num_args == 0);
+    /*send_empty(2, 4, &[16]).unwrap();
+    send_empty(2, 4, &[17]).unwrap();
+    send_empty(2, 4, &[18]).unwrap();
+    send_empty(2, 4, &[19]).unwrap();
+    send_empty(2, 1, &[16]).unwrap();
+    send_empty(2, 1, &[17]).unwrap();
+    send_empty(2, 1, &[18]).unwrap();
+    send_empty(2, 1, &[19]).unwrap();
+    */
     loop {
-        let mut temp_buffer = [0; 2];
-        send(1, 2, &mut temp_buffer, 0, 2).unwrap();
+        let mut temp_buffer = [2, 0];
+        send(1, 0, &mut temp_buffer, 1, 2).unwrap();
         let temp = u16::from_le_bytes(temp_buffer);
         if temp & 1 == 0 {
             // based of https://microcontrollerslab.com/raspberry-pi-pico-adc-tutorial/ accessed

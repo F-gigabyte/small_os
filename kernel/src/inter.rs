@@ -180,6 +180,10 @@ pub extern "C" fn nmi(trace: *mut StackTrace, lr: u32) -> *mut Proc {
         };
         // reset current process and hope it doesn't die again
         let mut scheduler = scheduler(&cs);
+        let pid = unsafe {
+            (*scheduler.get_current()).get_pid()
+        };
+        println!("Recoverable nmi for PID {}", pid);
         scheduler.reset_current();
         scheduler.next_process();
         let mut sys_tick = SYS_TICK.lock(&cs);
@@ -206,13 +210,16 @@ pub extern "C" fn nmi(trace: *mut StackTrace, lr: u32) -> *mut Proc {
 #[unsafe(no_mangle)]
 pub extern "C" fn hard_fault(trace: *mut StackTrace, lr: u32) -> *mut Proc {
     if lr & PROC_MASK != 0 {
-        println!("Recoverable hard fault");
         // recoverable hard fault in application
         let cs = unsafe {
             CS::new()
         };
         // reset current process and hope it doesn't die again
         let mut scheduler = scheduler(&cs);
+        let pid = unsafe {
+            (*scheduler.get_current()).get_pid()
+        };
+        println!("Recoverable hard fault for PID {}", pid);
         scheduler.reset_current();
         scheduler.next_process();
         let mut sys_tick = SYS_TICK.lock(&cs);

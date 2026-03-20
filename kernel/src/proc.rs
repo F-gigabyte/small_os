@@ -39,12 +39,12 @@ impl TryFrom<u32> for ProcState {
 
 #[derive(Debug)]
 pub enum ProcError {
-    InvalidPID(u32),
     InvalidState,
     StackTooSmall,
     NotOnStack,
     ErrorCode,
-    IRQTaken
+    IRQTaken,
+    InvalidPID(u32)
 }
 
 #[repr(C)]
@@ -57,7 +57,6 @@ pub struct Proc {
     pub r9: u32,
     pub r10: u32,
     pub r11: u32,
-    pub pid: u32,
     pub psp: u32,
     pub flags: u32,
     pub program: *mut Program,
@@ -75,11 +74,10 @@ impl Proc {
             r9: 0, // r9 (0x14)
             r10: 0, // r10 (0x18)
             r11: 0, // r11 (0x1c)
-            pid: 0, // pid (0x20)
-            psp: 0, // sp (0x24)
-            flags: 0, // (0x28) 
-            program: ptr::null_mut(), // (0x2c)
-            next: ptr::null_mut() // (0x30)
+            psp: 0, // sp (0x20)
+            flags: 0, // (0x24) 
+            program: ptr::null_mut(), // (0x28)
+            next: ptr::null_mut() // (0x2c)
         }
     }
 
@@ -174,18 +172,22 @@ impl Proc {
     // an array of `num_queues` queues
     pub unsafe fn init(
         &mut self, 
-        pid: u32, 
         program: &'static mut Program,
-        r0: u32
+        args: &[u32]
         ) -> Result<(), ProcError> {
         let sp_region = &program.regions[program.sp as usize];
         let mut sp = sp_region.get_runtime_addr().unwrap() + sp_region.actual_len;
-        sp -= 8 * 4;
-        program.write_word(sp, r0).map_err(|_| ProcError::StackTooSmall)?;
+        sp -= (8 + (args.len() as u32).saturating_sub(4)) * 4;
+        for (i, arg) in args.iter().enumerate() {
+            if i < 4 {
+                program.write_word(sp + (i * mem::size_of::<u32>()) as u32, *arg).map_err(|_| ProcError::StackTooSmall)?;
+            } else {
+                program.write_word(sp + ((i + 4) * mem::size_of::<u32>()) as u32, *arg).map_err(|_| ProcError::StackTooSmall)?;
+            }
+        }
         program.write_word(sp + 6 * mem::size_of::<u32>() as u32, program.entry).map_err(|_| ProcError::StackTooSmall)?;
         // set thumb mode but nothing else
         program.write_word(sp + 7 * mem::size_of::<u32>() as u32, 0x1000000).map_err(|_| ProcError::StackTooSmall)?;
-        self.pid = pid;
         self.psp = sp;
         self.flags = (program.priority() as u32) << proc_flags::PRIORITY_SHIFT | ((ProcState::Init as u32) << proc_flags::STATE_SHIFT);
         self.program = program;
@@ -232,6 +234,22 @@ impl Proc {
             &mut *self.program
         };
         prog.read_bytes(addr, len)
+    }
+
+    #[inline(always)]
+    pub fn get_pid(&self) -> u32 {
+        let prog = unsafe {
+            & *self.program
+        };
+        prog.pid
+    }
+
+    #[inline(always)]
+    pub fn get_driver(&self) -> u16 {
+        let prog = unsafe {
+            & *self.program
+        };
+        prog.driver()
     }
 
     pub fn check_access(&self, addr: u32, len: u32, attr: AccessAttr) -> Result<(), ()> {

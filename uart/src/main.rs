@@ -207,7 +207,6 @@ struct UART {
     registers: UniqueMmioPointer<'static, UARTRegisters>,
     set_reg: UniqueMmioPointer<'static, UARTRegisters>,
     clear_reg: UniqueMmioPointer<'static, UARTRegisters>,
-    tx_enabled: bool
 }
 
 impl UART {
@@ -219,16 +218,10 @@ impl UART {
                 registers: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(uart_base)).unwrap()), 
                 set_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(uart_base + REG_ALIAS_SET_BITS)).unwrap()), 
                 clear_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(uart_base + REG_ALIAS_CLR_BITS)).unwrap()),
-                tx_enabled: false
             }
         };
-        loop {
-            let flag = field!(res.registers, flag).read();
-            if flag & flag_register::BUSY_MASK == 0 {
-                break;
-            } else {
-                do_yield().unwrap();
-            }
+        while field!(res.registers, flag).read() & flag_register::BUSY_MASK != 0 {
+            do_yield().unwrap();
         }
         field!(res.registers, ctrl).write(0);
         // clear all interrupts
@@ -236,8 +229,10 @@ impl UART {
 
         // set baud rate to 115200
         // integer baud rate should be 6 and fractional should be 33 for a 12MHz clock
-        field!(res.registers, int_baud).write((6 << int_baud_rate_register::BAUD_DIVINT_SHIFT) & int_baud_rate_register::BAUD_DIVINT_MASK);
-        field!(res.registers, frac_baud).write((33 << frac_baud_rate_register::BAUD_DIVFRAC_SHIFT) & frac_baud_rate_register::BAUD_DIVFRAC_MASK);
+        //field!(res.registers, int_baud).write((6 << int_baud_rate_register::BAUD_DIVINT_SHIFT) & int_baud_rate_register::BAUD_DIVINT_MASK);
+        //field!(res.registers, frac_baud).write((33 << frac_baud_rate_register::BAUD_DIVFRAC_SHIFT) & frac_baud_rate_register::BAUD_DIVFRAC_MASK);
+        field!(res.registers, int_baud).write((69 << int_baud_rate_register::BAUD_DIVINT_SHIFT) & int_baud_rate_register::BAUD_DIVINT_MASK);
+        field!(res.registers, frac_baud).write((28 << frac_baud_rate_register::BAUD_DIVFRAC_SHIFT) & frac_baud_rate_register::BAUD_DIVFRAC_MASK);
         field!(res.registers, line_ctrl).write(line_ctrl_register::FEN_MASK | line_ctrl_register::WLEN_8);
         // mask all interrupts (no interrupts will be generated)
         field!(res.clear_reg, mask_set_clr).write(interrupt_register::ALL_MASK);
@@ -464,24 +459,16 @@ impl Request {
     }
 }
 
-const RESET_QUEUE: u32 = 0;
-const RESET_UART0: u32 = 22;
-
-const IO_BANK0_QUEUE: u32 = 1;
-
-const IO_BANK0_GPIO0: u32 = 0;
-const IO_BANK0_GPIO1: u32 = 1;
-
-const FUNC_SEL2: u8 = 2;
+const IO_BANK0_QUEUE: u32 = 0;
 
 /// Program entry point
 /// Disables mangling so it can be called from assembly
+/// Also has argument for GPIO mask but the driver doesn't care about this
 #[unsafe(no_mangle)]
-pub extern "C" fn main(uart_base: usize) {
-    // reset uart 0
-    send(RESET_QUEUE, RESET_UART0, &mut [], 0, 0).unwrap();
-    send(IO_BANK0_QUEUE, IO_BANK0_GPIO0, &mut [FUNC_SEL2], 1, 0).unwrap();
-    send(IO_BANK0_QUEUE, IO_BANK0_GPIO1, &mut [FUNC_SEL2], 1, 0).unwrap();
+pub extern "C" fn main(num_args: usize, uart_base: usize) {
+    assert!(num_args == 2);
+    // check func sel has finished
+    send_empty(IO_BANK0_QUEUE, 0, &[]).unwrap();
     let mut uart = unsafe {
         UART::new(uart_base)
     };

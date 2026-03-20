@@ -86,7 +86,8 @@ impl SyncMessageQueue {
             &mut *self.front
         };
         Ok(MessageHeader { 
-            pid: front.pid, 
+            pid: front.get_pid(), 
+            driver: front.get_driver() as u32,
             tag: front.get_r1().map_err(|_| QueueError::SenderInvalidMemoryAccess)?, // r1 contains message tag 
             len: front.get_r2().map_err(|_| QueueError::SenderInvalidMemoryAccess)? // r2 contains message length
         })

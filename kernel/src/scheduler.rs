@@ -1,6 +1,6 @@
 use core::{cell::UnsafeCell, ptr, slice};
 
-use crate::{inter::CS, message_queue::QueueError, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcError, ProcState}, program::{AccessAttr, Program}};
+use crate::{inter::CS, message_queue::QueueError, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcError, ProcState}, program::{__args, AccessAttr, Program}};
 
 // If this is changed, must change Proc struct
 const NUM_PRIORITIES: usize = 256;
@@ -47,10 +47,10 @@ impl Scheduler {
     /// pid doesn't refer to a process or `InvalidState` if the process is not in the `Free` state
     pub unsafe fn create_proc(
         &mut self, 
-        pid: u32, 
         program: &'static mut Program,
-        r0: u32
+        args: &[u32]
         ) -> Result<u32, ProcError> {
+        let pid = program.pid;
         if (pid as usize) >= self.processes.len() {
             return Err(ProcError::InvalidPID(pid));
         }
@@ -66,7 +66,7 @@ impl Scheduler {
                 }
             }
             unsafe {
-                proc.init(pid, program, r0)?;
+                proc.init(program, args)?;
             }
             for inter in inter {
                 let inter = inter as usize;
@@ -172,9 +172,14 @@ impl Scheduler {
     }
 
     pub fn next_current_process(&mut self) {
-        if self.current.is_null() {
-            self.next_process()
-        }
+        let priority = if self.current.is_null() {
+            NUM_PRIORITIES
+        } else {
+            unsafe {
+                (*self.current).priority() as usize
+            }
+        };
+        self.next_process_internal(priority);
     }
 
     /// Obtains the next process to be scheduled
@@ -188,9 +193,13 @@ impl Scheduler {
             let current = unsafe {
                 &mut *self.current
             };
-            priority = current.priority() as usize;
+            priority = current.priority() as usize + 1;
         }
-        // if process with same priority as current, select it to be scheduled next or else
+        self.next_process_internal(priority);
+    }
+
+    fn next_process_internal(&mut self, priority: usize) {
+        // if process with same priority as priority - 1, select it to be scheduled next or else
         // stick with current
         for (start, end) in self.start_proc[..priority].iter_mut().zip(self.end_proc[..priority].iter_mut()) {
             // when going to start of loop, it's because the last selected process is dead
@@ -240,11 +249,35 @@ impl Scheduler {
                 current.program = ptr::null_mut();
                 let program = &mut *program;
                 let driver = program.driver() as usize;
-                let r0 = if driver != 0 {
-                    program.regions[0].get_runtime_addr().unwrap()
-                } else {
-                    0
-                };
+                let mut args = [0; 6];
+                let kernel_args = &__args;
+                let mut arg_len = 0;
+                if driver != 0 {
+                    args[arg_len] = program.regions[0].get_runtime_addr().unwrap();
+                    arg_len += 1;
+                    if driver == 6 {
+                        // IO Bank 0
+                        args[arg_len] = kernel_args.pin_func[0];
+                        args[arg_len + 1] = kernel_args.pin_func[1];
+                        args[arg_len + 2] = kernel_args.pin_func[2];
+                        args[arg_len + 3] = kernel_args.pin_func[3];
+                        arg_len += 4;
+                    } else if driver == 8 {
+                        // Pads bank 0
+                        args[arg_len] = kernel_args.pads[0];
+                        args[arg_len + 1] = kernel_args.pads[1];
+                        arg_len += 2;
+                    } else if driver == 27 {
+                        // Resets
+                        args[arg_len] = kernel_args.resets;
+                        arg_len += 1;
+                    }
+                }
+                if program.pin_mask != 0 {
+                    args[arg_len] = program.pin_mask;
+                    arg_len += 1;
+                }
+
                 // reset region data
                 for region in &mut program.regions {
                     if region.enabled() {
@@ -263,11 +296,10 @@ impl Scheduler {
                     }
                 }
                 current.init(
-                    current.pid, 
                     &mut *program, 
-                    r0
+                    &args[..arg_len]
                 ).unwrap();
-                self.schedule_process(current.pid).unwrap();
+                self.schedule_process(current.get_pid()).unwrap();
             }
         }
     }
@@ -345,11 +377,13 @@ impl Scheduler {
                     &mut *queue.blocked
                 };
                 // pid
-                _ = proc.set_r0(current.pid);
+                _ = proc.set_r0(current.get_pid());
+                // driver
+                _ = proc.set_r1(current.get_driver() as u32);
                 // tag
-                _ = proc.set_r1(tag);
+                _ = proc.set_r2(tag);
                 // message length
-                _ = proc.set_r2(len);
+                _ = proc.set_r3(len);
                 // wake up blocked receiver
                 unsafe {
                     self.schedule_internal(queue.blocked);
@@ -384,7 +418,8 @@ impl Scheduler {
                 slice::from_raw_parts(data, len as usize)
             };
             let header = MessageHeader {
-                pid: current.pid,
+                pid: current.get_pid(),
+                driver: current.get_driver() as u32,
                 tag,
                 len
             };
@@ -395,11 +430,13 @@ impl Scheduler {
                 };
                 // set blocked processes message header
                 // pid
-                _ = proc.set_r0(current.pid);
+                _ = proc.set_r0(current.get_pid());
+                // driver
+                _ = proc.set_r1(current.get_driver() as u32);
                 // tag
-                _ = proc.set_r1(tag);
+                _ = proc.set_r2(tag);
                 // message length
-                _ = proc.set_r2(len);
+                _ = proc.set_r3(len);
                 // wake up blocked receiver
                 unsafe {
                     self.schedule_internal(queue.blocked);
@@ -426,8 +463,9 @@ impl Scheduler {
             match queue.read_header() {
                 Ok(header) => {
                     _ = current.set_r0(header.pid);
-                    _ = current.set_r1(header.tag);
-                    _ = current.set_r2(header.len);
+                    _ = current.set_r1(header.driver as u32);
+                    _ = current.set_r2(header.tag);
+                    _ = current.set_r3(header.len);
                     Ok(())
                 },
                 Err(err) => {
@@ -461,8 +499,9 @@ impl Scheduler {
             match queue.read_header() {
                 Ok(header) => {
                     _ = current.set_r0(header.pid);
-                    _ = current.set_r1(header.tag);
-                    _ = current.set_r2(header.len);
+                    _ = current.set_r1(header.driver as u32);
+                    _ = current.set_r2(header.tag);
+                    _ = current.set_r3(header.len);
                     Ok(())
                 },
                 Err(err) => {

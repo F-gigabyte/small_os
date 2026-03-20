@@ -154,7 +154,6 @@ _sys_call:
     mov r6, r10
     mov r7, r11
     stm r0!, {r4-r7}
-    adds r0, #4 // increment after pid
     mrs r1, psp
     // save stack pointer
     str r1, [r0]
@@ -200,7 +199,6 @@ _sys_pend:
     mov r6, r10
     mov r7, r11
     stm r0!, {r4-r7}
-    adds r0, #4 // increment after pid
     mrs r1, psp
     // save stack pointer
     str r1, [r0]
@@ -239,7 +237,6 @@ _irq:
     mov r6, r10
     mov r7, r11
     stm r0!, {r4-r7}
-    adds r0, #4 // increment after pid
     mrs r1, psp
     // save stack pointer
     str r1, [r0]
@@ -286,7 +283,7 @@ _proc_switch:
     stm r2!, {r4-r7}
     mrs r1, psp
     // save stack pointer
-    str r1, [r2, #4]
+    str r1, [r2]
 1:
     bl sys_tick
     // if got null pointer (no process) wait for an interrupt and try again

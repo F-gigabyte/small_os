@@ -5,7 +5,7 @@
 
 use core::{intrinsics::abort, panic::PanicInfo, ptr::{self}};
 
-use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, read_header, receive, reply_empty, send};
+use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, read_header, receive, reply_empty, send, send_empty};
 
 mod gpio_ctrl_register {
     pub const FUNCSEL_SHIFT: usize = 0;
@@ -50,14 +50,31 @@ pub const MAX_FUNC: u8 = 9;
 pub const FUNC_NULL: u8 = 0x1f;
 
 pub struct IOBank0 {
-    registers: *mut u32
+    registers: *mut u32,
+    func_sel: [u32; 4]
 }
 
 impl IOBank0 {
-    const unsafe fn new(base: usize) -> Self {
-        Self {
-            registers: ptr::with_exposed_provenance_mut(base)
+    unsafe fn new(base: usize, func_sel0: u32, func_sel1: u32, func_sel2: u32, func_sel3: u32) -> Self {
+        let mut res = Self {
+            registers: ptr::with_exposed_provenance_mut(base),
+            func_sel: [func_sel0, func_sel1, func_sel2, func_sel3]
+        };
+        for i in 0..30 {
+            res.reset_gpio(i as u8);
         }
+        res
+    }
+
+    pub fn reset_gpio(&mut self, gpio: u8) {
+        assert!(gpio <= MAX_GPIO);
+        let index = (gpio / 8) as usize;
+        let shift = (gpio % 8) * 4;
+        let mut func = (self.func_sel[index] >> shift & 0xf) as u8;
+        if func > 9 {
+            func = FUNC_NULL;
+        }
+        self.set_gpio_func(gpio, func);
     }
 
     pub fn set_gpio_func(&mut self, gpio: u8, func: u8) {
@@ -79,6 +96,7 @@ impl IOBank0 {
 
 pub enum IOBank0ReplyError {
     SendError,
+    InvalidRequest,
     InvalidGPIO,
     InvalidFunc,
     InvalidSendBuffer,
@@ -98,10 +116,11 @@ impl From<IOBank0ReplyError> for u32 {
     fn from(value: IOBank0ReplyError) -> Self {
         match value {
             IOBank0ReplyError::SendError => 1,
-            IOBank0ReplyError::InvalidGPIO => 2,
-            IOBank0ReplyError::InvalidFunc => 3,
-            IOBank0ReplyError::InvalidSendBuffer => 4,
-            IOBank0ReplyError::InvalidReplyBuffer => 5
+            IOBank0ReplyError::InvalidRequest => 2,
+            IOBank0ReplyError::InvalidGPIO => 3,
+            IOBank0ReplyError::InvalidFunc => 4,
+            IOBank0ReplyError::InvalidSendBuffer => 5,
+            IOBank0ReplyError::InvalidReplyBuffer => 6
         }
     }
 }
@@ -129,31 +148,33 @@ impl From<HeaderError> for IOBank0Error {
     }
 }
 
-pub struct Request {
-    gpio: u8,
-    func: u8
+pub enum Request {
+    Finished,
+    ResetGPIO(u8)
 }
 
 impl Request {
     pub fn parse() -> Result<Self, IOBank0Error> {
         let header = read_header(0)?;
-        if header.tag > MAX_GPIO as u32 {
-            return Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidGPIO));
+        match header.tag {
+            0 => {
+                // Finished request
+                check_header_len(&header, 0, 0)?;
+                Ok(Self::Finished)
+            },
+            1 => {
+                // GPIO request
+                check_header_len(&header, 1, 0)?;
+                let mut buffer = [0; 1];
+                _ = receive(0, &mut buffer)?;
+                let gpio = buffer[0];
+                if gpio > MAX_GPIO {
+                    return Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidGPIO));
+                }
+                Ok(Self::ResetGPIO(gpio))
+            },
+            _ => Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidRequest))
         }
-        let gpio = header.tag as u8;
-        check_header_len(&header, 1, 0)?;
-        let mut buffer = [0; 1];
-        _ = receive(0, &mut buffer)?;
-        let mut func = buffer[0];
-        if func == 0xff {
-            func = FUNC_NULL;
-        } else if func > MAX_FUNC {
-            return Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidFunc));
-        }
-        Ok(Self { 
-            gpio, 
-            func 
-        })
     }
 }
 
@@ -165,20 +186,29 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 const RESET_QUEUE: u32 = 0;
-const RESET_IO_BANK0: u32 = 5;
+
+const PADS_QUEUE: u32 = 1;
 
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main(io_bank0_base: usize) {
+pub extern "C" fn main(num_args: usize, io_bank0_base: usize, func_sel0: u32, func_sel1: u32, func_sel2: u32, func_sel3: u32) {
+    assert!(num_args == 5);
+    // check reset is finished
+    send_empty(RESET_QUEUE, 0, &[]).unwrap();
+    // check pads is finished
+    send_empty(PADS_QUEUE, 0, &[]).unwrap();
     // don't reset IO Bank 0 as reset by kernel
     let mut io_bank0 = unsafe {
-        IOBank0::new(io_bank0_base)
+        IOBank0::new(io_bank0_base, func_sel0, func_sel1, func_sel2, func_sel3)
     };
     loop {
         match Request::parse() {
             Ok(request) => {
-                io_bank0.set_gpio_func(request.gpio, request.func);
+                match request {
+                    Request::Finished => {},
+                    Request::ResetGPIO(gpio) => io_bank0.reset_gpio(gpio),
+                }
                 check_critical(reply_empty(0, 0)).unwrap_or(Ok(())).unwrap();
             },
             Err(err) => {

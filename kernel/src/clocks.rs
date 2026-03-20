@@ -240,7 +240,7 @@ impl Clocks {
         // peripheral clock
         field!(self.clear_reg, peri_ctrl).write(peri_ctrl_register::ENABLE_MASK);
         wait::wait_cycles(36);
-        field!(self.registers, peri_ctrl).write(peri_ctrl_register::AUXSRC_XOSC);
+        field!(self.registers, peri_ctrl).write(peri_ctrl_register::AUXSRC_SYS);
         field!(self.set_reg, peri_ctrl).write(peri_ctrl_register::ENABLE_MASK);
         wait::wait_cycles(36);
         // ADC clock
