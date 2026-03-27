@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use small_os_lib::{HeaderError, QueueError, WakeSrc, check_critical, check_header_len, notify_reply_empty, notify_send, read_header, receive, reply, reply_empty, send_empty, wait_irq, wait_queues_irq};
+use small_os_lib::{HeaderError, QueueError, WakeSrc, check_critical, check_header_len, clear_irq, notify_reply_empty, notify_send, read_header, receive, reply, reply_empty, send_empty, wait_irq, wait_queues_irq};
 use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, WriteOnly}};
@@ -101,9 +101,7 @@ impl Timer {
     #[inline(always)]
     pub fn clear_irq(&mut self, timer: u8) {
         assert!(timer < 4);
-        field!(self.registers, int_raw).write(1 << timer);
-        let irq = field!(self.registers, int_raw).read();
-        field!(self.registers, int_raw).write(1 << timer);
+        field!(self.clear_reg, int_raw).write(1 << timer);
     }
 
     pub fn set_timer0(&mut self, count: u32) {
@@ -184,7 +182,6 @@ impl Timer {
         while mask > 0 && index < 4 {
             if mask & 1 != 0 {
                 self.clear_irq(index as u8);
-                self.disable_irq(index as u8);
                 if self.notifiers[index] {
                     check_critical(notify_reply_empty(index as u32, 0)).unwrap_or(Ok(())).unwrap();
                     self.notifiers[index] = false;
@@ -193,6 +190,7 @@ impl Timer {
                 mask >>= 1;
             }
         }
+        clear_irq().unwrap();
     }
 }
 

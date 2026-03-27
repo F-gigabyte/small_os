@@ -1,6 +1,6 @@
 use core::{cell::UnsafeCell, ptr, slice};
 
-use crate::{inter::{CS, IRQError}, message_queue::{AsyncMessageQueue, QueueError, SyncMessageQueue}, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, nvic::NVIC, proc::{Proc, ProcError, ProcState}, program::{__args, AccessAttr, Program}};
+use crate::{inter::{CS, IRQError}, message_queue::{AsyncMessageQueue, QueueError, SyncMessageQueue}, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, nvic::NVIC, println, proc::{Proc, ProcError, ProcState}, program::{__args, AccessAttr, Program}};
 
 // If this is changed, must change Proc struct
 const NUM_PRIORITIES: usize = 256;
@@ -584,6 +584,7 @@ impl Scheduler {
             & *proc.program
         };
         let pending = nvic.get_pending();
+        println!("Pending ({}) is 0x{:x}", proc.get_pid(), pending);
         let mut mask = proc.get_irq_mask();
         for (i, inter) in program.interrupts().iter().enumerate() {
             if *inter < 32 && pending & (1 << *inter) != 0 {
@@ -592,6 +593,7 @@ impl Scheduler {
             }
         }
         let pending = nvic.get_pending();
+        println!("Pending is now 0x{:x}", pending);
         proc.clear_irqs();
         mask
     }
@@ -693,7 +695,7 @@ impl Scheduler {
             let irq_mask = Self::get_proc_irq_mask_clear(current, cs);
             if irq_mask != 0 {
                 _ = current.set_r0(1);
-                _ = current.set_r1(current.get_irq_mask() as u32);
+                _ = current.set_r1(irq_mask as u32);
                 return Ok(());
             }
         }
@@ -760,7 +762,7 @@ impl Scheduler {
             let irq_mask = Self::get_proc_irq_mask_clear(current, cs);
             if irq_mask != 0 {
                 _ = current.set_r0(1);
-                _ = current.set_r1(current.get_irq_mask() as u32);
+                _ = current.set_r1(irq_mask as u32);
                 return Ok(());
             }
         }
