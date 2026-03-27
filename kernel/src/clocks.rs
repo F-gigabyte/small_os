@@ -230,7 +230,7 @@ impl Clocks {
         while field!(self.registers, sys_selected).read() & sys_ctrl_register::SRC_MASK != 1 {}
         let mut sys_ctrl = field!(self.registers, sys_ctrl).read();
         sys_ctrl &= !sys_ctrl_register::AUXSRC_MASK;
-        sys_ctrl |= sys_ctrl_register::AUXSRC_PLL_SYS;
+        sys_ctrl |= sys_ctrl_register::AUXSRC_PLL_USB;
         field!(self.registers, sys_ctrl).write(sys_ctrl);
         let mut sys_ctrl = field!(self.registers, sys_ctrl).read();
         sys_ctrl &= !sys_ctrl_register::SRC_MASK;

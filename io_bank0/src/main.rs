@@ -1,9 +1,7 @@
-#![feature(core_intrinsics)]
-
 #![no_std]
 #![no_main]
 
-use core::{intrinsics::abort, panic::PanicInfo, ptr::{self}};
+use core::ptr::{self};
 
 use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, read_header, receive, reply_empty, send, send_empty};
 
@@ -15,10 +13,10 @@ mod gpio_ctrl_register {
     pub const IRQOVER_SHIFT: usize = 28;
 
     pub const FUNCSEL_MASK: u32 = 0x1f << FUNCSEL_SHIFT;
-    pub const OUTOVER_MASK: u32 = 0x2 << OUTOVER_SHIFT;
-    pub const OEOVER_MASK: u32 = 0x2 << OEOVER_SHIFT;
-    pub const INOVER_MASK: u32 = 0x2 << INOVER_SHIFT;
-    pub const IRQOVER_MASK: u32 = 0x2 << IRQOVER_SHIFT;
+    pub const OUTOVER_MASK: u32 = 0x3 << OUTOVER_SHIFT;
+    pub const OEOVER_MASK: u32 = 0x3 << OEOVER_SHIFT;
+    pub const INOVER_MASK: u32 = 0x3 << INOVER_SHIFT;
+    pub const IRQOVER_MASK: u32 = 0x3 << IRQOVER_SHIFT;
 
     pub const FUNCSEL_MIN: u32 = 1;
     pub const FUNCSEL_MAX: u32 = 9;
@@ -48,6 +46,13 @@ mod gpio_ctrl_register {
 pub const MAX_GPIO: u8 = 29;
 pub const MAX_FUNC: u8 = 9;
 pub const FUNC_NULL: u8 = 0x1f;
+
+#[derive(Debug, Clone, Copy)]
+pub enum GPIODrive {
+    Normal = 0x0,
+    Low = 0x2,
+    High = 0x3
+}
 
 pub struct IOBank0 {
     registers: *mut u32,
@@ -88,6 +93,22 @@ impl IOBank0 {
             gpio_ctrl_register::OEOVER_NORMAL |
             gpio_ctrl_register::INOVER_NORMAL |
             gpio_ctrl_register::IRQOVER_NORMAL;
+        unsafe {
+            gpio_ptr.write_volatile(val);
+        }
+    }
+
+    pub fn drive_gpio(&mut self, gpio: u8, drive: GPIODrive) {
+        assert!(gpio <= MAX_GPIO);
+        let gpio_ptr = unsafe {
+            self.registers.add((gpio as usize) * 2 + 1)
+        };
+        let mut val = unsafe {
+            gpio_ptr.read_volatile()
+        };
+        val &= !gpio_ctrl_register::OUTOVER_MASK;
+        let drive = drive as u32;
+        val |= drive << gpio_ctrl_register::OUTOVER_SHIFT;
         unsafe {
             gpio_ptr.write_volatile(val);
         }
@@ -150,7 +171,23 @@ impl From<HeaderError> for IOBank0Error {
 
 pub enum Request {
     Finished,
-    ResetGPIO(u8)
+    ResetGPIO(u8),
+    DriveGPIO(u8, GPIODrive),
+}
+
+fn gpio_from_mask(mut mask: u32, mut index: u8) -> Option<u8> {
+    let mut gpio = 0;
+    while mask > 0 {
+        if mask & 1 != 0 {
+            if index == 0 {
+                return Some(gpio)
+            }
+            index -= 1;
+        }
+        gpio += 1;
+        mask >>= 1;
+    }
+    None
 }
 
 impl Request {
@@ -163,26 +200,56 @@ impl Request {
                 Ok(Self::Finished)
             },
             1 => {
-                // GPIO request
+                // Reset GPIO request
                 check_header_len(&header, 1, 0)?;
                 let mut buffer = [0; 1];
                 _ = receive(0, &mut buffer)?;
-                let gpio = buffer[0];
-                if gpio > MAX_GPIO {
-                    return Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidGPIO));
+                let gpio = gpio_from_mask(header.pin_mask, buffer[0]);
+                if let Some(gpio) = gpio {
+                    Ok(Self::ResetGPIO(gpio))
+                } else {
+                    Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidGPIO))
                 }
-                Ok(Self::ResetGPIO(gpio))
+            },
+            2 => {
+                // Drive GPIO high
+                check_header_len(&header, 1, 0)?;
+                let mut buffer = [0; 1];
+                _ = receive(0, &mut buffer)?;
+                let gpio = gpio_from_mask(header.pin_mask, buffer[0]);
+                if let Some(gpio) = gpio {
+                    Ok(Self::DriveGPIO(gpio, GPIODrive::High))
+                } else {
+                    Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidGPIO))
+                }
+            },
+            3 => {
+                // Drive GPIO low
+                check_header_len(&header, 1, 0)?;
+                let mut buffer = [0; 1];
+                _ = receive(0, &mut buffer)?;
+                let gpio = gpio_from_mask(header.pin_mask, buffer[0]);
+                if let Some(gpio) = gpio {
+                    Ok(Self::DriveGPIO(gpio, GPIODrive::Low))
+                } else {
+                    Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidGPIO))
+                }
+            },
+            4 => {
+                // Drive GPIO normal
+                check_header_len(&header, 1, 0)?;
+                let mut buffer = [0; 1];
+                _ = receive(0, &mut buffer)?;
+                let gpio = gpio_from_mask(header.pin_mask, buffer[0]);
+                if let Some(gpio) = gpio {
+                    Ok(Self::DriveGPIO(gpio, GPIODrive::Normal))
+                } else {
+                    Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidGPIO))
+                }
             },
             _ => Err(IOBank0Error::ReplyError(IOBank0ReplyError::InvalidRequest))
         }
     }
-}
-
-/// panic handler
-/// this function is called when a panic happens
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    abort()
 }
 
 const RESET_QUEUE: u32 = 0;
@@ -208,6 +275,7 @@ pub extern "C" fn main(num_args: usize, io_bank0_base: usize, func_sel0: u32, fu
                 match request {
                     Request::Finished => {},
                     Request::ResetGPIO(gpio) => io_bank0.reset_gpio(gpio),
+                    Request::DriveGPIO(gpio, drive) => io_bank0.drive_gpio(gpio, drive)
                 }
                 check_critical(reply_empty(0, 0)).unwrap_or(Ok(())).unwrap();
             },

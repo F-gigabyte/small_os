@@ -1,12 +1,10 @@
-#![feature(core_intrinsics)]
-
 #![no_std]
 #![no_main]
 
-use core::{intrinsics::abort, panic::PanicInfo, ptr::{self, NonNull}};
+use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadOnly, ReadPure, ReadPureWrite, ReadWrite}};
-use small_os_lib::{HeaderError, QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, check_header_len, do_yield, read_header, receive, reply, reply_empty, send, send_empty, wait_irq};
+use small_os_lib::{HeaderError, QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, check_header_len, do_yield, read_header, receive, reply, reply_empty, send_empty, wait_irq};
 
 #[repr(C)]
 struct ADCRegisters {
@@ -474,13 +472,6 @@ impl Request {
             }
         }
     }
-}
-
-/// panic handler
-/// this function is called when a panic happens
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    abort()
 }
 
 const IO_BANK0_QUEUE: u32 = 0;

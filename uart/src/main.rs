@@ -1,10 +1,7 @@
-// use core intrinsics 
-#![feature(core_intrinsics)]
-
 #![no_std]
 #![no_main]
 
-use core::{intrinsics::abort, panic::PanicInfo, ptr::{self, NonNull}};
+use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, ReadWrite, WriteOnly}};
 use small_os_lib::{QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, check_header_len, do_yield, read_header, receive, reply, reply_empty, send, send_empty, wait_irq};
@@ -231,8 +228,8 @@ impl UART {
         // integer baud rate should be 6 and fractional should be 33 for a 12MHz clock
         //field!(res.registers, int_baud).write((6 << int_baud_rate_register::BAUD_DIVINT_SHIFT) & int_baud_rate_register::BAUD_DIVINT_MASK);
         //field!(res.registers, frac_baud).write((33 << frac_baud_rate_register::BAUD_DIVFRAC_SHIFT) & frac_baud_rate_register::BAUD_DIVFRAC_MASK);
-        field!(res.registers, int_baud).write((69 << int_baud_rate_register::BAUD_DIVINT_SHIFT) & int_baud_rate_register::BAUD_DIVINT_MASK);
-        field!(res.registers, frac_baud).write((28 << frac_baud_rate_register::BAUD_DIVFRAC_SHIFT) & frac_baud_rate_register::BAUD_DIVFRAC_MASK);
+        field!(res.registers, int_baud).write((26 << int_baud_rate_register::BAUD_DIVINT_SHIFT) & int_baud_rate_register::BAUD_DIVINT_MASK);
+        field!(res.registers, frac_baud).write((3 << frac_baud_rate_register::BAUD_DIVFRAC_SHIFT) & frac_baud_rate_register::BAUD_DIVFRAC_MASK);
         field!(res.registers, line_ctrl).write(line_ctrl_register::FEN_MASK | line_ctrl_register::WLEN_8);
         // mask all interrupts (no interrupts will be generated)
         field!(res.clear_reg, mask_set_clr).write(interrupt_register::ALL_MASK);
@@ -360,13 +357,6 @@ impl UART {
     }
 }
 
-/// panic handler
-/// this function is called when a panic happens
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    abort()
-}
-
 pub enum UARTReplyError {
     SendError,
     InvalidRequest,
@@ -408,9 +398,9 @@ pub enum RequestType {
     Receive
 }
 
-impl TryFrom<u32> for RequestType {
+impl TryFrom<u16> for RequestType {
     type Error = UARTReplyError;
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::Send),
             1 => Ok(Self::Receive),

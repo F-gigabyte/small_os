@@ -82,6 +82,10 @@ _start:
     ldr r0, =__procs_virt_start
     ldr r1, =__procs_virt_end
     bl _zero
+    // 0 notifiers
+    ldr r0, =__notifier_virt_start
+    ldr r1, =__notifier_virt_end
+    bl _zero
     // jump to main
     bl main
     // halt if return

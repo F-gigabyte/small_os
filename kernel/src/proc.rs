@@ -1,13 +1,15 @@
-use core::{mem, ptr};
+use core::{mem, ptr, slice};
 
 use crate::{program::{AccessAttr, Program}};
 
 mod proc_flags {
     pub const PRIORITY_SHIFT: usize = 0;
     pub const STATE_SHIFT: usize = 8;
+    pub const IRQ_SHIFT: usize = 12;
 
     pub const PRIORITY_MASK: u32 = 0xff << PRIORITY_SHIFT;
-    pub const STATE_MASK: u32 = 0x7 << STATE_SHIFT;
+    pub const STATE_MASK: u32 = 0xf << STATE_SHIFT;
+    pub const IRQ_MASK: u32 = 0xf << IRQ_SHIFT;
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -16,9 +18,18 @@ pub enum ProcState {
     Init = 1,
     Scheduled = 2,
     Running = 3,
-    Blocked = 4,
-    BlockedIRQ = 5,
-    Dead = 6
+    BlockedQueue = 4,
+    BlockedQueues = 5,
+    BlockedIRQ = 6,
+    BlockedQueuesIRQ = 7,
+    BlockedEndpoint = 8,
+    Dead = 9
+}
+
+impl ProcState {
+    pub fn blocked(&self) -> bool {
+        matches!(self, Self::BlockedQueues | Self::BlockedQueue | Self::BlockedQueuesIRQ | Self::BlockedIRQ)
+    }
 }
 
 impl TryFrom<u32> for ProcState {
@@ -29,9 +40,12 @@ impl TryFrom<u32> for ProcState {
             1 => Ok(ProcState::Init),
             2 => Ok(ProcState::Scheduled),
             3 => Ok(ProcState::Running),
-            4 => Ok(ProcState::Blocked),
-            5 => Ok(ProcState::BlockedIRQ),
-            6 => Ok(ProcState::Dead),
+            4 => Ok(ProcState::BlockedQueue),
+            5 => Ok(ProcState::BlockedQueues),
+            6 => Ok(ProcState::BlockedIRQ),
+            7 => Ok(ProcState::BlockedQueuesIRQ),
+            8 => Ok(ProcState::BlockedEndpoint),
+            9 => Ok(ProcState::Dead),
             _ => Err(value)
         }
     }
@@ -252,11 +266,69 @@ impl Proc {
         prog.driver()
     }
 
+    #[inline(always)]
+    pub fn get_pin_mask(&self) -> u32 {
+        let prog = unsafe {
+            & *self.program
+        };
+        prog.pin_mask
+    }
+
+    #[inline(always)]
+    pub fn get_irq_mask(&self) -> u8 {
+        ((self.flags & proc_flags::IRQ_MASK) >> proc_flags::IRQ_SHIFT) as u8
+    }
+    
+    #[inline(always)]
+    pub fn clear_irqs(&mut self) {
+        self.flags &= !proc_flags::IRQ_MASK;
+    }
+
+    #[inline(always)]
+    pub fn mask_in_irq(&mut self, irq: u8) {
+        self.flags |= (1 << self.index_irq(irq).unwrap()) << proc_flags::IRQ_SHIFT;
+    }
+
     pub fn check_access(&self, addr: u32, len: u32, attr: AccessAttr) -> Result<(), ()> {
         let prog = unsafe {
             & *self.program
         };
         prog.check_access(addr, len, attr)
+    }
+
+    pub fn wake_from_async_queues(&mut self) {
+        let program = unsafe {
+            &mut *self.program
+        };
+        if program.async_queues.is_null() {
+            return;
+        }
+        let async_queues = unsafe {
+            slice::from_raw_parts_mut(program.async_queues, program.num_async_queues() as usize)
+        };
+        for queue in async_queues {
+            queue.blocked = ptr::null_mut();
+        }
+    }
+
+    pub fn wake_from_sync_queues(&mut self) {
+        let program = unsafe {
+            &mut *self.program
+        };
+        if program.sync_queues.is_null() {
+            return;
+        }
+        let sync_queues = unsafe {
+            slice::from_raw_parts_mut(program.sync_queues, program.num_sync_queues() as usize)
+        };
+        for queue in sync_queues {
+            queue.blocked = ptr::null_mut();
+        }
+    }
+
+    pub fn wake_from_queues(&mut self) {
+        self.wake_from_sync_queues();
+        self.wake_from_async_queues();
     }
 }
 

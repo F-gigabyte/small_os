@@ -1,20 +1,9 @@
-// use core intrinsics 
-#![feature(core_intrinsics)]
-
 #![no_std]
 #![no_main]
 
-use core::{fmt::{self, Write}, intrinsics::abort, panic::PanicInfo};
+use core::fmt::{self, Write};
 
 use small_os_lib::{send, send_empty};
-
-
-/// panic handler
-/// this function is called when a panic happens
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    abort()
-}
 
 struct UARTPrint {}
 
@@ -40,8 +29,8 @@ macro_rules! print {
 
 #[macro_export]
 macro_rules! println {
-    () => ($crate::print!("\n"));
-    ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
+    () => ($crate::print!("\r\n"));
+    ($($arg:tt)*) => ($crate::print!("{}\r\n", format_args!($($arg)*)));
 }
 
 #[doc(hidden)]
@@ -85,5 +74,10 @@ pub extern "C" fn main(num_args: usize) {
             let int = temp / 10;
             println!("This is test proc! ({}.{}C)\r", int, frac);
         }
+        let mut version_info = [0; 4];
+        send(2, 4, &mut version_info, 0, 4).unwrap();
+        println!("Camera version: {}.{}\r\nYear: {}\r\nMonth: {}\r\nDate: {}", version_info[0] >> 4, version_info[0] & 0xf, version_info[1] as usize + 2000, version_info[2], version_info[3]);
+        send(2, 5, &mut version_info, 0, 2).unwrap();
+        println!("Manufacture ID: 0x{:x}", u16::from_le_bytes(version_info[..2].try_into().unwrap()));
     }
 }

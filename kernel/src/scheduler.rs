@@ -1,6 +1,6 @@
 use core::{cell::UnsafeCell, ptr, slice};
 
-use crate::{inter::CS, message_queue::QueueError, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, proc::{Proc, ProcError, ProcState}, program::{__args, AccessAttr, Program}};
+use crate::{inter::{CS, IRQError}, message_queue::{AsyncMessageQueue, QueueError, SyncMessageQueue}, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, nvic::NVIC, proc::{Proc, ProcError, ProcState}, program::{__args, AccessAttr, Program}};
 
 // If this is changed, must change Proc struct
 const NUM_PRIORITIES: usize = 256;
@@ -72,6 +72,7 @@ impl Scheduler {
                 let inter = inter as usize;
                 if inter < self.irq_events.len() {
                     self.irq_events[inter] = proc;
+                    
                 }
             }
             Ok(pid)
@@ -85,7 +86,7 @@ impl Scheduler {
             let current = self.current;
             self.current = ptr::null_mut();
             unsafe {
-                self.schedule_internal(current);
+                self.schedule_internal::<true>(current);
             }
         }
     }
@@ -94,7 +95,7 @@ impl Scheduler {
     /// preconditions for proc must be upheld as though it was passed through `schedule_process`
     /// proc must not be accessed from `self.processes`
     /// proc must not be `self.current`
-    unsafe fn schedule_internal(&mut self, proc: *mut Proc) {
+    unsafe fn schedule_internal<const LAST: bool>(&mut self, proc: *mut Proc) {
         let proc = unsafe {
             &mut *proc
         };
@@ -115,32 +116,43 @@ impl Scheduler {
         proc.set_state(ProcState::Scheduled);
         proc.next = ptr::null_mut();
         let priority = proc.priority() as usize;
-        // check null case
-        if self.end_proc[priority].is_null() {
-            self.start_proc[priority] = &raw mut *proc;
-            self.end_proc[priority] = &raw mut *proc;
+        if LAST {
+            // check null case
+            if self.end_proc[priority].is_null() {
+                self.start_proc[priority] = &raw mut *proc;
+                self.end_proc[priority] = &raw mut *proc;
+            } else {
+                let last = unsafe {
+                    &mut *self.end_proc[priority]
+                };
+                last.next = &raw mut *proc;
+                self.end_proc[priority] = &raw mut *proc;
+            }
         } else {
-            let last = unsafe {
-                &mut *self.end_proc[priority]
-            };
-            last.next = &raw mut *proc;
-            self.end_proc[priority] = &raw mut *proc;
+            // check null case
+            if self.end_proc[priority].is_null() {
+                self.start_proc[priority] = &raw mut *proc;
+                self.end_proc[priority] = &raw mut *proc;
+            } else {
+                let start = self.start_proc[priority];
+                proc.next = start;
+                self.start_proc[priority] = &raw mut *proc;
+            }
         }
     }
 
     /// Adds process to be scheduled
     /// On success returns nothing. On error, returns `InvalidPID` if the `pid` doesn't
-    /// refer to a process or `InvalidState` if the process is not in the `Init`, `Blocked` or
-    /// `Running` states
+    /// refer to a process or `InvalidState` if the process is not in the `Init` or a blocked state
     pub fn schedule_process(&mut self, pid: u32) -> Result<(), ProcError> {
         if (pid as usize) >= self.processes.len() {
             return Err(ProcError::InvalidPID(pid));
         }
         let state = self.processes[pid as usize].get_mut().get_state();
-        if state == ProcState::Init || state == ProcState::Blocked {
+        if state == ProcState::Init || state.blocked() {
             let proc = self.processes[pid as usize].get();
             unsafe {
-                self.schedule_internal(proc);
+                self.schedule_internal::<true>(proc);
             }
             Ok(())
         } else {
@@ -306,35 +318,77 @@ impl Scheduler {
 
     /// Suspends the current process to wait for IRQ number `irq`
     /// `irq` must be a valid IRQ number
-    pub fn sleep_irq(&mut self) {
+    pub fn sleep_irq(&mut self, cs: &CS) -> Result<(), IRQError> {
         if !self.current.is_null() {
             let current = unsafe {
                 &mut *self.current
             };
-            self.current = ptr::null_mut();
-            current.set_state(ProcState::BlockedIRQ);
+            let program = unsafe {
+                & *current.program
+            };
+            if !program.has_interrupt() {
+                return Err(IRQError::NoIRQ)
+            }
+            let mut nvic = NVIC.lock(&cs);
+            let irq_mask = Self::get_proc_irq_mask_clear(current, cs);
+            if irq_mask != 0 {
+                _ = current.set_r0(irq_mask as u32);
+            } else {
+                self.current = ptr::null_mut();
+                current.set_state(ProcState::BlockedIRQ);
+                // enable the IRQs for firing
+                for inter in program.interrupts() {
+                    if *inter < 32 {
+                        nvic.enable_irq(*inter);
+                    }
+                }
+            }
         }
+        Ok(())
     }
 
-    /// Wakes up all processes waiting on IRQ number `irq`
+    /// Wakes up process waiting on IRQ number `irq`
     /// `irq` must be a valid IRQ number
-    pub fn wake(&mut self, irq: u8) {
-        let irq = irq as usize;
-        let current = self.irq_events[irq];
+    pub fn wake(&mut self, irq: u8, cs: &CS) {
+        let mut nvic = NVIC.lock(&cs);
+        nvic.clear_pending_irq(irq);
+        nvic.disable_irq(irq);
+        let current = self.irq_events[irq as usize];
         if !current.is_null() {
             let proc = unsafe {
                 &mut *current
             };
             if proc.get_state() == ProcState::BlockedIRQ {
                 // fine to unwrap as this should be one of this processes IRQs
-                _ = proc.set_r0(proc.index_irq(irq as u8).unwrap() as u32);
+                // proc IRQ mask should be 0
+                _ = proc.set_r0(1 << proc.index_irq(irq).unwrap());
                 unsafe {
-                    self.schedule_internal(proc);
+                    self.schedule_internal::<false>(proc);
+                }
+            } else if proc.get_state() == ProcState::BlockedQueuesIRQ {
+                // proc IRQ mask should be 0
+                _ = proc.set_r0(1);
+                _ = proc.set_r1(1 << proc.index_irq(irq).unwrap());
+                proc.wake_from_queues();
+                unsafe {
+                    self.schedule_internal::<false>(proc);
                 }
             } else if proc.get_state() == ProcState::Dead {
                 Self::free_proc(&mut self.irq_events, proc);
+            } else {
+                proc.mask_in_irq(irq);
             }
         }
+    }
+
+    pub fn clear_irq(&mut self, cs: &CS) -> Result<(), IRQError> {
+        if !self.current.is_null() {
+            let current = unsafe {
+                &mut *self.current
+            };
+            Self::get_proc_irq_mask_clear(current, cs);
+        }
+        Ok(())
     }
 
     fn free_proc(irq_events: &mut [*mut Proc], proc: *mut Proc) {
@@ -370,25 +424,46 @@ impl Scheduler {
                 &mut **program.sync_endpoints.add(endpoint as usize)
             };
             // block current process
-            current.set_state(ProcState::Blocked);
+            current.set_state(ProcState::BlockedEndpoint);
             self.current = ptr::null_mut();
             if !queue.blocked.is_null() {
                 let proc = unsafe {
                     &mut *queue.blocked
                 };
-                // pid
-                _ = proc.set_r0(current.get_pid());
-                // driver
-                _ = proc.set_r1(current.get_driver() as u32);
-                // tag
-                _ = proc.set_r2(tag);
-                // message length
-                _ = proc.set_r3(len);
-                // wake up blocked receiver
-                unsafe {
-                    self.schedule_internal(queue.blocked);
+                if proc.get_state() == ProcState::BlockedQueue {
+                    // pid
+                    _ = proc.set_r0(current.get_pid());
+                    // pin mask
+                    _ = proc.set_r1(current.get_pin_mask());
+                    // driver tag
+                    _ = proc.set_r2(((current.get_driver() as u32) << 16) | (tag & 0xffff));
+                    // message length
+                    _ = proc.set_r3(len);
+                    queue.blocked = ptr::null_mut();
+                    // wake up blocked receiver
+                    unsafe {
+                        self.schedule_internal::<false>(proc);
+                    }
+                } else {
+                    let sync_queues = unsafe {
+                        (*proc.program).sync_queues
+                    };
+                    let queue_num = unsafe { (queue as *mut SyncMessageQueue).offset_from_unsigned(sync_queues) } as u32;
+                    if proc.get_state() == ProcState::BlockedQueues {
+                        // queue that woke it
+                        _ = proc.set_r0(queue_num);
+                    } else {
+                        // woken from queue
+                        _ = proc.set_r0(0);
+                        // queue that woke it
+                        _ = proc.set_r1(queue_num);
+                    }
+                    proc.wake_from_sync_queues();
+                    // wake up blocked receiver
+                    unsafe {
+                        self.schedule_internal::<false>(proc);
+                    }
                 }
-                queue.blocked = ptr::null_mut();
             }
             // send current to queue
             unsafe {
@@ -397,6 +472,31 @@ impl Scheduler {
             Ok(())
         } else {
             Err(QueueError::InvalidQueue(endpoint))
+        }
+    }
+
+    pub fn notify_send(&mut self, queue: u32, notifier: u32) -> Result<(), QueueError> {
+        let current = unsafe {
+            &mut *self.current
+        };
+        let program = unsafe {
+            & *current.program
+        };
+        if queue < program.num_sync_queues() {
+            let queue = unsafe {
+                &mut *program.sync_queues.add(queue as usize)
+            };
+            if notifier < program.num_notifier_queues() {
+                let notifier = unsafe {
+                    &mut *program.notifiers.add(notifier as usize)
+                };
+                notifier.put(queue.take()?);
+                Ok(())
+            } else {
+                Err(QueueError::InvalidNotifer(notifier))
+            }
+        } else {
+            Err(QueueError::InvalidQueue(queue))
         }
     }
 
@@ -419,8 +519,8 @@ impl Scheduler {
             };
             let header = MessageHeader {
                 pid: current.get_pid(),
-                driver: current.get_driver() as u32,
-                tag,
+                pin_mask: current.get_pin_mask(),
+                driver_tag: ((current.get_driver() as u32) << 16) | (tag & 0xffff),
                 len
             };
             queue.send(header, data)?;
@@ -428,25 +528,72 @@ impl Scheduler {
                 let proc = unsafe {
                     &mut *queue.blocked
                 };
-                // set blocked processes message header
-                // pid
-                _ = proc.set_r0(current.get_pid());
-                // driver
-                _ = proc.set_r1(current.get_driver() as u32);
-                // tag
-                _ = proc.set_r2(tag);
-                // message length
-                _ = proc.set_r3(len);
-                // wake up blocked receiver
-                unsafe {
-                    self.schedule_internal(queue.blocked);
+                if proc.get_state() == ProcState::BlockedQueue {
+                    // pid
+                    _ = proc.set_r0(current.get_pid());
+                    // pin mask
+                    _ = proc.set_r1(current.get_pin_mask());
+                    // driver tag
+                    _ = proc.set_r2(((current.get_driver() as u32) << 16) | (tag & 0xffff));
+                    // message length
+                    _ = proc.set_r3(len);
+                    queue.blocked = ptr::null_mut();
+                    // wake up blocked receiver
+                    unsafe {
+                        self.schedule_internal::<false>(proc);
+                    }
+                } else {
+                    let async_queues = unsafe {
+                        (*proc.program).async_queues
+                    };
+                    let queue_num = unsafe { (queue as *mut AsyncMessageQueue).offset_from_unsigned(async_queues) } as u32;
+                    if proc.get_state() == ProcState::BlockedQueues {
+                        // queue that woke it
+                        _ = proc.set_r0(queue_num);
+                    } else {
+                        // woken from queue
+                        _ = proc.set_r0(0);
+                        // queue that woke it
+                        _ = proc.set_r1(queue_num);
+                    }
+                    proc.wake_from_async_queues();
+                    // wake up blocked receiver
+                    unsafe {
+                        self.schedule_internal::<false>(proc);
+                    }
                 }
-                queue.blocked = ptr::null_mut();
             }
             Ok(())
         } else {
             Err(QueueError::InvalidQueue(endpoint))
         }
+    }
+
+    fn sync_header_internal(&mut self, current: &mut Proc, queue: &mut SyncMessageQueue) -> Result<(), QueueError> {
+        let header = queue.read_header()?;
+        _ = current.set_r0(header.pid);
+        _ = current.set_r1(header.pin_mask);
+        _ = current.set_r2(header.driver_tag);
+        _ = current.set_r3(header.len);
+        Ok(())
+    }
+
+    fn get_proc_irq_mask_clear(proc: &mut Proc, cs: &CS) -> u8 {
+        let mut nvic = NVIC.lock(cs);
+        let program = unsafe {
+            & *proc.program
+        };
+        let pending = nvic.get_pending();
+        let mut mask = proc.get_irq_mask();
+        for (i, inter) in program.interrupts().iter().enumerate() {
+            if *inter < 32 && pending & (1 << *inter) != 0 {
+                mask |= 1 << i;
+                nvic.clear_pending_irq(*inter);
+            }
+        }
+        let pending = nvic.get_pending();
+        proc.clear_irqs();
+        mask
     }
 
     pub fn header(&mut self, queue: u32, block: bool) -> Result<(), QueueError> {
@@ -456,32 +603,40 @@ impl Scheduler {
         let program = unsafe {
             & *current.program
         };
-        if queue < program.num_sync_queues {
+        if queue < program.num_sync_queues() {
             let queue = unsafe {
                 &mut *program.sync_queues.add(queue as usize)
             };
-            match queue.read_header() {
-                Ok(header) => {
-                    _ = current.set_r0(header.pid);
-                    _ = current.set_r1(header.driver as u32);
-                    _ = current.set_r2(header.tag);
-                    _ = current.set_r3(header.len);
-                    Ok(())
-                },
-                Err(err) => {
-                    if block && let QueueError::QueueEmpty = err {
-                        // block current process
-                        current.set_state(ProcState::Blocked);
-                        queue.blocked = &raw mut *current;
-                        self.current = ptr::null_mut();
-                        Ok(())
-                    } else {
-                        Err(err)
-                    }
+            if let Err(err) = self.sync_header_internal(current, queue) {
+                if err == QueueError::QueueEmpty && block {
+                    // block current process
+                    current.set_state(ProcState::BlockedQueue);
+                    queue.blocked = &raw mut *current;
+                    self.current = ptr::null_mut();
+                } else {
+                    return Err(err);
                 }
             }
+            Ok(())
         } else {
             Err(QueueError::InvalidQueue(queue))
+        }
+    }
+
+    pub fn notify_header(&mut self, notifier: u32) -> Result<(), QueueError> {
+        let current = unsafe {
+            &mut *self.current
+        };
+        let program = unsafe {
+            & *current.program
+        };
+        if notifier < program.num_notifier_queues() {
+            let notifier = unsafe {
+                &mut *program.notifiers.add(notifier as usize)
+            };
+            self.sync_header_internal(current, notifier)
+        } else {
+            Err(QueueError::InvalidQueue(notifier))
         }
     }
     
@@ -492,22 +647,22 @@ impl Scheduler {
         let program = unsafe {
             & *current.program
         };
-        if queue < program.num_async_queues {
+        if queue < program.num_async_queues() {
             let queue = unsafe {
                 &mut *program.async_queues.add(queue as usize)
             };
             match queue.read_header() {
                 Ok(header) => {
                     _ = current.set_r0(header.pid);
-                    _ = current.set_r1(header.driver as u32);
-                    _ = current.set_r2(header.tag);
+                    _ = current.set_r1(header.pin_mask);
+                    _ = current.set_r2(header.driver_tag);
                     _ = current.set_r3(header.len);
                     Ok(())
                 },
                 Err(err) => {
                     if block && let QueueError::QueueEmpty = err {
                         // block current process
-                        current.set_state(ProcState::Blocked);
+                        current.set_state(ProcState::BlockedQueue);
                         queue.blocked = &raw mut *current;
                         self.current = ptr::null_mut();
                         Ok(())
@@ -519,6 +674,148 @@ impl Scheduler {
         } else {
             Err(QueueError::InvalidQueue(queue))
         }
+    }
+
+    pub fn wait_queues(&mut self, queue_mask: u32, irq: bool, cs: &CS) -> Result<(), QueueError> {
+        let current = unsafe {
+            &mut *self.current
+        };
+        let program = unsafe {
+            & *current.program
+        };
+        let sync_queues = unsafe {
+            slice::from_raw_parts_mut(program.sync_queues, program.num_sync_queues() as usize)
+        };
+        if queue_mask == 0 {
+            return Err(QueueError::NoQueueMask);
+        }
+        if irq {
+            let irq_mask = Self::get_proc_irq_mask_clear(current, cs);
+            if irq_mask != 0 {
+                _ = current.set_r0(1);
+                _ = current.set_r1(current.get_irq_mask() as u32);
+                return Ok(());
+            }
+        }
+        let mut index = 0;
+        let mut mask = queue_mask;
+        while mask != 0 {
+            if index >= sync_queues.len() {
+                return Err(QueueError::InvalidQueue(index as u32));
+            }
+            if mask & 1 != 0 {
+                if !sync_queues[index].is_empty() {
+                    if irq {
+                        _ = current.set_r0(0);
+                        _ = current.set_r1(index as u32);
+                    } else {
+                        _ = current.set_r0(index as u32);
+                    }
+                    return Ok(())
+                }
+            }
+            index += 1;
+            mask >>= 1;
+        }
+        let mut index = 0;
+        let mut mask = queue_mask;
+        while mask != 0 {
+            if mask & 1 != 0 {
+                sync_queues[index].blocked = current;
+            }
+            index += 1;
+            mask >>= 1;
+        }
+        if irq {
+            let mut nvic = NVIC.lock(cs);
+            // enable the IRQs for firing
+            for inter in program.interrupts() {
+                if *inter < 32 {
+                    nvic.enable_irq(*inter);
+                }
+            }
+            current.set_state(ProcState::BlockedQueuesIRQ);
+        } else {
+            current.set_state(ProcState::BlockedQueues);
+        }
+        self.current = ptr::null_mut();
+        Ok(())
+    }
+
+    pub fn wait_queues_async(&mut self, queue_mask: u32, irq: bool, cs: &CS) -> Result<(), QueueError> {
+        let current = unsafe {
+            &mut *self.current
+        };
+        let program = unsafe {
+            & *current.program
+        };
+        let async_queues = unsafe {
+            slice::from_raw_parts_mut(program.async_queues, program.num_async_queues() as usize)
+        };
+        if queue_mask == 0 {
+            _ = current.set_r0(0);
+            return Ok(());
+        }
+        if irq {
+            let irq_mask = Self::get_proc_irq_mask_clear(current, cs);
+            if irq_mask != 0 {
+                _ = current.set_r0(1);
+                _ = current.set_r1(current.get_irq_mask() as u32);
+                return Ok(());
+            }
+        }
+        let mut index = 0;
+        let mut mask = queue_mask;
+        while mask != 0 {
+            if mask & 1 != 0 {
+                if index >= async_queues.len() {
+                    return Err(QueueError::InvalidQueue(index as u32));
+                }
+                if !async_queues[index].is_empty() {
+                    if irq {
+                        _ = current.set_r0(0);
+                        _ = current.set_r1(index as u32);
+                    } else {
+                        _ = current.set_r0(index as u32);
+                    }
+                    return Ok(())
+                }
+            }
+            index += 1;
+            mask >>= 1;
+        }
+        let mut index = 0;
+        let mut mask = queue_mask;
+        while mask != 0 {
+            if mask & 1 != 0 {
+                async_queues[index].blocked = current;
+            }
+            index += 1;
+            mask >>= 1;
+        }
+        if irq {
+            let mut nvic = NVIC.lock(cs);
+            // enable the IRQs for firing
+            for inter in program.interrupts() {
+                if *inter < 32 {
+                    nvic.enable_irq(*inter);
+                }
+            }
+            current.set_state(ProcState::BlockedQueuesIRQ);
+        } else {
+            current.set_state(ProcState::BlockedQueues);
+        }
+        self.current = ptr::null_mut();
+        Ok(())
+    }
+
+    unsafe fn sync_receive_message_internal(&mut self, current: &mut Proc, queue: &mut SyncMessageQueue, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
+        let data = queue.read_data(len as usize)?;
+        let len = data.len();
+        // check access is valid
+        current.write_bytes(buffer as u32, data).map_err(|_| QueueError::InvalidMemoryAccess)?;
+        _ = current.set_r0(len as u32);
+        Ok(())
     }
 
     /// SAFETY
@@ -530,20 +827,39 @@ impl Scheduler {
         let program = unsafe {
             & *current.program
         };
-        if queue < program.num_sync_queues {
+        if queue < program.num_sync_queues() {
             let queue = unsafe {
                 &mut *program.sync_queues.add(queue as usize)
             };
-            let data = queue.read_data(len as usize)?;
-            let len = data.len();
-            // check access is valid
-            current.write_bytes(buffer as u32, data).map_err(|_| QueueError::InvalidMemoryAccess)?;
-            _ = current.set_r0(len as u32);
-            Ok(())
+            unsafe {
+                self.sync_receive_message_internal(current, queue, len, buffer)
+            }
         } else {
             Err(QueueError::InvalidQueue(queue))
         }
     }
+
+    /// SAFETY
+    /// `data` points to a buffer of length `len` 
+    pub unsafe fn notify_receive_message(&mut self, notifier: u32, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
+        let current = unsafe {
+            &mut *self.current
+        };
+        let program = unsafe {
+            & *current.program
+        };
+        if notifier < program.num_notifier_queues() {
+            let notifier = unsafe {
+                &mut *program.sync_queues.add(notifier as usize)
+            };
+            unsafe {
+                self.sync_receive_message_internal(current, notifier, len, buffer)
+            }
+        } else {
+            Err(QueueError::InvalidQueue(notifier))
+        }
+    }
+
     
     /// SAFETY
     /// `data` points to a buffer of length `len` 
@@ -554,7 +870,7 @@ impl Scheduler {
         let program = unsafe {
             & *current.program
         };
-        if queue < program.num_async_queues {
+        if queue < program.num_async_queues() {
             let queue = unsafe {
                 &mut *program.async_queues.add(queue as usize)
             };
@@ -568,6 +884,38 @@ impl Scheduler {
         }
     }
 
+    fn sync_reply_internal(&mut self, current: &mut Proc, queue: &mut SyncMessageQueue, msg: u32, len: u32, buffer: *const u8) -> Result<(), QueueError> {
+        let buffer = if len > 0 {
+            Some(current.read_bytes(buffer as u32, len as usize).map_err(|_| QueueError::InvalidMemoryAccess)?)
+        } else {
+            None
+        };
+        // wake up sender and send reply
+        match queue.reply(msg, buffer) {
+            Ok(sender) => {
+                unsafe {
+                    self.schedule_internal::<false>(&raw mut *sender);
+                }
+                Ok(())
+            },
+            Err((proc, err)) => {
+                if proc.is_null() {
+                    Err(err)
+                } else {
+                    assert!(err == QueueError::SenderInvalidMemoryAccess);
+                    let proc = unsafe {
+                        &mut *proc
+                    };
+                    _ = proc.set_r12(u32::from(QueueError::InvalidMemoryAccess) + 1);
+                    unsafe {
+                        self.schedule_internal::<true>(proc);
+                    }
+                    Err(err)
+                }
+            }
+        }
+    }
+
     pub fn reply(&mut self, queue: u32, msg: u32, len: u32, buffer: *const u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
@@ -575,23 +923,30 @@ impl Scheduler {
         let program = unsafe {
             & *current.program
         };
-        if queue < program.num_sync_queues {
+        if queue < program.num_sync_queues() {
             let queue = unsafe {
                 &mut *program.sync_queues.add(queue as usize)
             };
-            let buffer = if len > 0 {
-                Some(current.read_bytes(buffer as u32, len as usize).map_err(|_| QueueError::InvalidMemoryAccess)?)
-            } else {
-                None
-            };
-            // wake up sender and send reply
-            let sender = queue.reply(msg, buffer)?;
-            unsafe {
-                self.schedule_internal(&raw mut *sender);
-            }
-            Ok(())
+            self.sync_reply_internal(current, queue, msg, len, buffer)
         } else {
             Err(QueueError::InvalidQueue(queue))
+        }
+    }
+
+    pub fn notify_reply(&mut self, notifier: u32, msg: u32, len: u32, buffer: *const u8) -> Result<(), QueueError> {
+        let current = unsafe {
+            &mut *self.current
+        };
+        let program = unsafe {
+            & *current.program
+        };
+        if notifier < program.num_notifier_queues() {
+            let notifier = unsafe {
+                &mut *program.notifiers.add(notifier as usize)
+            };
+            self.sync_reply_internal(current, notifier, msg, len, buffer)
+        } else {
+            Err(QueueError::InvalidQueue(notifier))
         }
     }
 
@@ -614,9 +969,13 @@ impl Scheduler {
         }
         let proc = self.processes[pid as usize].get_mut();
         let state = proc.get_state();
-        if matches!(state, ProcState::Blocked | ProcState::Scheduled) {
+        if matches!(state, ProcState::BlockedEndpoint) || state == ProcState::Scheduled {
             // set proc to dead as may be referenced by other processes
             proc.set_state(ProcState::Dead);
+            Ok(())
+        } else if matches!(state, ProcState::BlockedQueue | ProcState::BlockedQueues | ProcState::BlockedQueuesIRQ) {
+            proc.wake_from_queues();
+            Self::free_proc(&mut self.irq_events, proc);
             Ok(())
         } else if matches!(state, ProcState::Running | ProcState::Init) {
             // free proc as not referenced anywhere else
@@ -760,5 +1119,4 @@ mod test {
         }
         println!("[ok]");
     }
-
 }

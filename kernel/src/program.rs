@@ -5,16 +5,6 @@ use hamming::{calc_symbol_len, calc_symbols, check_hamming_crc, correct_errors, 
 
 use crate::{inter::CS, message_queue::{AsyncMessageQueue, SyncMessageQueue}, println, proc::Proc, scheduler::scheduler};
 
-fn read_time() -> u64 {
-    let addr = 0x40054000;
-    let timer: *const u32 = ptr::with_exposed_provenance(addr);
-    unsafe {
-        let lower = timer.add(3).read_volatile();
-        let upper = timer.add(4).read_volatile();
-        ((upper as u64) << 32) | (lower as u64)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegionAttr {
     R = 0b00,
@@ -240,14 +230,18 @@ impl Region {
     }
 
     pub fn check_crc(&self) -> Option<Result<(), ()>> {
-        if self.has_error_codes() && self.has_phys() {
-            let data = unsafe {
-                slice::from_raw_parts(ptr::with_exposed_provenance(self.phys_addr as usize), (self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>())
-            };
-            if check_crc(data, self.crc) {
-                Some(Ok(()))
+        if cfg!(feature = "error_codes") {
+            if self.has_error_codes() && self.has_phys() {
+                let data = unsafe {
+                    slice::from_raw_parts(ptr::with_exposed_provenance(self.phys_addr as usize), (self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>())
+                };
+                if check_crc(data, self.crc) {
+                    Some(Ok(()))
+                } else {
+                    Some(Err(()))
+                }
             } else {
-                Some(Err(()))
+                None
             }
         } else {
             None
@@ -266,39 +260,41 @@ impl Region {
         if !self.enabled() || self.is_device() {
             return Ok(());
         }
-        if let Some(codes) = self.error_codes() {
-            let block_len = block_len as usize;
-            let blocks = (((self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>()) + block_len - 1) / block_len;
-            let symbol_len = calc_symbol_len(block_len);
-            let code_len = symbol_len + 1; // + 1 for CRC
-            let region_mem_len = (self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>();
-            let mem_ptr: *mut u32 = ptr::with_exposed_provenance_mut(self.get_virt().unwrap() as usize);
-            let codes_ptr: *mut u32 = ptr::with_exposed_provenance_mut(codes as usize);
-            for i in 0..blocks {
-                let mem_offset = block_len * i;
-                let region_len = if mem_offset + block_len <= region_mem_len {
-                    block_len
-                } else {
-                    region_mem_len - mem_offset
-                };
-                let current_symbol_len = calc_symbol_len(region_len);
-                let crc: &u32 = unsafe {
-                    &*codes_ptr.add(i * code_len + current_symbol_len)
-                };
-                let region_mem: &mut [u32] = unsafe {
-                    slice::from_raw_parts_mut(mem_ptr.add(mem_offset), region_len)
-                };
-                let symbols: &mut [u32] = unsafe {
-                    slice::from_raw_parts_mut(codes_ptr.add(i * code_len), current_symbol_len)
-                };
-                if !check_hamming_crc(symbols, region_mem, *crc) {
-                    println!("Correcting errors");
-                    if let Err(err) = correct_errors(symbols, region_mem) {
-                        return Err(err);
-                    }
-                    // check CRC says no errors
+        if cfg!(feature = "error_codes") {
+            if let Some(codes) = self.error_codes() {
+                let block_len = block_len as usize;
+                let blocks = (((self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>()) + block_len - 1) / block_len;
+                let symbol_len = calc_symbol_len(block_len);
+                let code_len = symbol_len + 1; // + 1 for CRC
+                let region_mem_len = (self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>();
+                let mem_ptr: *mut u32 = ptr::with_exposed_provenance_mut(self.get_virt().unwrap() as usize);
+                let codes_ptr: *mut u32 = ptr::with_exposed_provenance_mut(codes as usize);
+                for i in 0..blocks {
+                    let mem_offset = block_len * i;
+                    let region_len = if mem_offset + block_len <= region_mem_len {
+                        block_len
+                    } else {
+                        region_mem_len - mem_offset
+                    };
+                    let current_symbol_len = calc_symbol_len(region_len);
+                    let crc: &u32 = unsafe {
+                        &*codes_ptr.add(i * code_len + current_symbol_len)
+                    };
+                    let region_mem: &mut [u32] = unsafe {
+                        slice::from_raw_parts_mut(mem_ptr.add(mem_offset), region_len)
+                    };
+                    let symbols: &mut [u32] = unsafe {
+                        slice::from_raw_parts_mut(codes_ptr.add(i * code_len), current_symbol_len)
+                    };
                     if !check_hamming_crc(symbols, region_mem, *crc) {
-                        return Err(())
+                        println!("Correcting errors");
+                        if let Err(err) = correct_errors(symbols, region_mem) {
+                            return Err(err);
+                        }
+                        // check CRC says no errors
+                        if !check_hamming_crc(symbols, region_mem, *crc) {
+                            return Err(())
+                        }
                     }
                 }
             }
@@ -307,65 +303,69 @@ impl Region {
     }
     
     pub fn update_codes(&mut self, block_len: u32) {
-        if let Some(codes) = self.error_codes() {
-            let block_len = block_len as usize;
-            let blocks = (((self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>()) + block_len - 1) / block_len;
-            let symbol_len = calc_symbol_len(block_len);
-            let region_mem_len = (self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>();
-            let code_len = symbol_len + 1; // + 1 for CRC
-            let mem_ptr: *mut u32 = ptr::with_exposed_provenance_mut(self.get_virt().unwrap() as usize);
-            let codes_ptr: *mut u32 = ptr::with_exposed_provenance_mut(codes as usize);
-            for i in 0..blocks {
-                let mem_offset = block_len * i;
-                let region_len = if mem_offset + block_len <= region_mem_len {
-                    block_len
-                } else {
-                    region_mem_len - mem_offset
-                };
-                let current_symbol_len = calc_symbol_len(region_len);
-                let crc: &mut u32 = unsafe {
-                    &mut *codes_ptr.add(i * code_len + current_symbol_len)
-                };
-                let region_mem: &mut [u32] = unsafe {
-                    slice::from_raw_parts_mut(mem_ptr.add(mem_offset), region_len)
-                };
-                let symbols: &mut [u32] = unsafe {
-                    slice::from_raw_parts_mut(codes_ptr.add(i * code_len), current_symbol_len)
-                };
-                if !check_hamming_crc(symbols, region_mem, *crc) {
-                    *crc = calc_symbols(symbols, region_mem);
+        if cfg!(feature = "error_codes") {
+            if let Some(codes) = self.error_codes() {
+                let block_len = block_len as usize;
+                let blocks = (((self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>()) + block_len - 1) / block_len;
+                let symbol_len = calc_symbol_len(block_len);
+                let region_mem_len = (self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>();
+                let code_len = symbol_len + 1; // + 1 for CRC
+                let mem_ptr: *mut u32 = ptr::with_exposed_provenance_mut(self.get_virt().unwrap() as usize);
+                let codes_ptr: *mut u32 = ptr::with_exposed_provenance_mut(codes as usize);
+                for i in 0..blocks {
+                    let mem_offset = block_len * i;
+                    let region_len = if mem_offset + block_len <= region_mem_len {
+                        block_len
+                    } else {
+                        region_mem_len - mem_offset
+                    };
+                    let current_symbol_len = calc_symbol_len(region_len);
+                    let crc: &mut u32 = unsafe {
+                        &mut *codes_ptr.add(i * code_len + current_symbol_len)
+                    };
+                    let region_mem: &mut [u32] = unsafe {
+                        slice::from_raw_parts_mut(mem_ptr.add(mem_offset), region_len)
+                    };
+                    let symbols: &mut [u32] = unsafe {
+                        slice::from_raw_parts_mut(codes_ptr.add(i * code_len), current_symbol_len)
+                    };
+                    if !check_hamming_crc(symbols, region_mem, *crc) {
+                        *crc = calc_symbols(symbols, region_mem);
+                    }
                 }
             }
         }
     }
     
     pub fn encode_codes(&mut self, block_len: u32) {
-        if let Some(codes) = self.error_codes() {
-            let block_len = block_len as usize;
-            let blocks = (((self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>()) + block_len - 1) / block_len;
-            let symbol_len = calc_symbol_len(block_len);
-            let region_mem_len = (self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>();
-            let code_len = symbol_len + 1; // + 1 for CRC
-            let mem_ptr: *mut u32 = ptr::with_exposed_provenance_mut(self.get_virt().unwrap() as usize);
-            let codes_ptr: *mut u32 = ptr::with_exposed_provenance_mut(codes as usize);
-            for i in 0..blocks {
-                let mem_offset = block_len * i;
-                let region_len = if mem_offset + block_len <= region_mem_len {
-                    block_len
-                } else {
-                    region_mem_len - mem_offset
-                };
-                let current_symbol_len = calc_symbol_len(region_len);
-                let crc: &mut u32 = unsafe {
-                    &mut *codes_ptr.add(i * code_len + current_symbol_len)
-                };
-                let region_mem: &mut [u32] = unsafe {
-                    slice::from_raw_parts_mut(mem_ptr.add(mem_offset), region_len)
-                };
-                let symbols: &mut [u32] = unsafe {
-                    slice::from_raw_parts_mut(codes_ptr.add(i * code_len), current_symbol_len)
-                };
-                *crc = calc_symbols(symbols, region_mem);
+        if cfg!(feature = "error_codes") {
+            if let Some(codes) = self.error_codes() {
+                let block_len = block_len as usize;
+                let blocks = (((self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>()) + block_len - 1) / block_len;
+                let symbol_len = calc_symbol_len(block_len);
+                let region_mem_len = (self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>();
+                let code_len = symbol_len + 1; // + 1 for CRC
+                let mem_ptr: *mut u32 = ptr::with_exposed_provenance_mut(self.get_virt().unwrap() as usize);
+                let codes_ptr: *mut u32 = ptr::with_exposed_provenance_mut(codes as usize);
+                for i in 0..blocks {
+                    let mem_offset = block_len * i;
+                    let region_len = if mem_offset + block_len <= region_mem_len {
+                        block_len
+                    } else {
+                        region_mem_len - mem_offset
+                    };
+                    let current_symbol_len = calc_symbol_len(region_len);
+                    let crc: &mut u32 = unsafe {
+                        &mut *codes_ptr.add(i * code_len + current_symbol_len)
+                    };
+                    let region_mem: &mut [u32] = unsafe {
+                        slice::from_raw_parts_mut(mem_ptr.add(mem_offset), region_len)
+                    };
+                    let symbols: &mut [u32] = unsafe {
+                        slice::from_raw_parts_mut(codes_ptr.add(i * code_len), current_symbol_len)
+                    };
+                    *crc = calc_symbols(symbols, region_mem);
+                }
             }
         }
     }
@@ -373,29 +373,36 @@ impl Region {
     /// SAFETY
     /// offset must be within memory bounds and codes must be the region's codes offset
     unsafe fn write_word_internal(&mut self, codes: u32, addr: u32, offset: usize, word: u32, block_len: u32) {
-        let block_len = block_len as usize;
-        let block = offset / block_len;
-        let current_block_len = if (block + 1) * block_len * mem::size_of::<u32>() > self.actual_len as usize {
-            ((self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>()) - block * block_len
+        if cfg!(feature = "error_codes") {
+            let block_len = block_len as usize;
+            let block = offset / block_len;
+            let current_block_len = if (block + 1) * block_len * mem::size_of::<u32>() > self.actual_len as usize {
+                ((self.actual_len as usize + mem::size_of::<u32>() - 1) / mem::size_of::<u32>()) - block * block_len
+            } else {
+                block_len
+            };
+            let block_offset = offset - block * block_len;
+            let symbol_len = calc_symbol_len(block_len);
+            let code_len = symbol_len + 1; // + 1 for CRC
+            let current_symbol_len = calc_symbol_len(current_block_len);
+            let mem_ptr: *mut u32 = ptr::with_exposed_provenance_mut(addr as usize);
+            let codes_ptr: *mut u32 = ptr::with_exposed_provenance_mut(codes as usize);
+            let crc: &mut u32 = unsafe {
+                &mut *codes_ptr.add(block * code_len + current_symbol_len)
+            };
+            let region_mem: &mut [u32] = unsafe {
+                slice::from_raw_parts_mut(mem_ptr.add(block * block_len), current_block_len)
+            };
+            let symbols: &mut [u32] = unsafe {
+                slice::from_raw_parts_mut(codes_ptr.add(block * code_len), current_symbol_len)
+            };
+            *crc = update_msg(symbols, region_mem, *crc, block_offset, word);
         } else {
-            block_len
-        };
-        let block_offset = offset - block * block_len;
-        let symbol_len = calc_symbol_len(block_len);
-        let code_len = symbol_len + 1; // + 1 for CRC
-        let current_symbol_len = calc_symbol_len(current_block_len);
-        let mem_ptr: *mut u32 = ptr::with_exposed_provenance_mut(addr as usize);
-        let codes_ptr: *mut u32 = ptr::with_exposed_provenance_mut(codes as usize);
-        let crc: &mut u32 = unsafe {
-            &mut *codes_ptr.add(block * code_len + current_symbol_len)
-        };
-        let region_mem: &mut [u32] = unsafe {
-            slice::from_raw_parts_mut(mem_ptr.add(block * block_len), current_block_len)
-        };
-        let symbols: &mut [u32] = unsafe {
-            slice::from_raw_parts_mut(codes_ptr.add(block * code_len), current_symbol_len)
-        };
-        *crc = update_msg(symbols, region_mem, *crc, block_offset, word);
+            let ptr: *mut u32 = ptr::with_exposed_provenance_mut(addr as usize + offset * 4);
+            unsafe {
+                ptr.write(word);
+            }
+        }
     }
 
     /// SAFETY
@@ -514,14 +521,14 @@ pub struct Program {
     pub sp: u32,
     pub entry: u32,
     pub regions: [Region; 8],
-    pub num_sync_queues: u32,
+    pub num_queues: u32,
     pub num_sync_endpoints: u32,
     pub sync_queues: *mut SyncMessageQueue,
     pub sync_endpoints: *const *mut SyncMessageQueue,
-    pub num_async_queues: u32,
     pub num_async_endpoints: u32,
     pub async_queues: *mut AsyncMessageQueue,
     pub async_endpoints: *const *mut AsyncMessageQueue,
+    pub notifiers: *mut SyncMessageQueue,
     pub block_len: u32,
     pub pin_mask: u32
 }
@@ -534,12 +541,32 @@ impl Program {
     const DRIVER_MASK: u32 = 0xffff << Self::DRIVER_SHIFT;
     const INTERRUPT_NONE: u8 = 0xff;
 
+    const SYNC_QUEUES_SHIFT: usize = 0;
+    const ASYNC_QUEUES_SHIFT: usize = 8;
+    const NOTIFIER_QUEUES_SHIFT: usize = 16;
+
+    const SYNC_QUEUES_MASK: u32 = 0xff << Self::SYNC_QUEUES_SHIFT;
+    const ASYNC_QUEUES_MASK: u32 = 0xff << Self::ASYNC_QUEUES_SHIFT;
+    const NOTIFIER_QUEUES_MASK: u32 = 0xff << Self::NOTIFIER_QUEUES_SHIFT;
+
     pub fn priority(&self) -> u8 {
         ((self.flags & Self::PRIORITY_MASK) >> Self::PRIORITY_SHIFT) as u8
     }
     
     pub fn driver(&self) -> u16 {
         ((self.flags & Self::DRIVER_MASK) >> Self::DRIVER_SHIFT) as u16
+    }
+
+    pub fn num_sync_queues(&self) -> u32 {
+        (self.num_queues & Self::SYNC_QUEUES_MASK) >> Self::SYNC_QUEUES_SHIFT
+    }
+    
+    pub fn num_async_queues(&self) -> u32 {
+        (self.num_queues & Self::ASYNC_QUEUES_MASK) >> Self::ASYNC_QUEUES_SHIFT
+    }
+    
+    pub fn num_notifier_queues(&self) -> u32 {
+        (self.num_queues & Self::NOTIFIER_QUEUES_MASK) >> Self::NOTIFIER_QUEUES_SHIFT
     }
 
     pub fn interrupt(&self, inter: usize) -> Option<u8> {
@@ -679,22 +706,27 @@ impl Program {
     }
 
     pub fn update_codes(&mut self) {
-        for region in &mut self.regions {
-            if region.enabled() {
-                region.update_codes(self.block_len);
+        if cfg!(feature = "error_codes") {
+            for region in &mut self.regions {
+                if region.enabled() {
+                    region.update_codes(self.block_len);
+                }
             }
         }
     }
 
     pub fn correct_errors(&mut self) -> Result<(), ()> {
-        for region in &mut self.regions {
-            if region.enabled() {
-                region.check_crc().unwrap_or(Ok(())).expect("Have uncorrectable flash error");
+        #[cfg(feature = "error_codes")]
+        if cfg!(feature = "error_codes") {
+            for region in &mut self.regions {
+                if region.enabled() {
+                    region.check_crc().unwrap_or(Ok(())).expect("Have uncorrectable flash error");
+                }
             }
-        }
-        for region in &mut self.regions {
-            if region.enabled() {
-                region.fix_valid(self.block_len)?;
+            for region in &mut self.regions {
+                if region.enabled() {
+                    region.fix_valid(self.block_len)?;
+                }
             }
         }
         Ok(())
@@ -720,7 +752,6 @@ impl Program {
                             error = false;
                             break;
                         } else {
-                            println!("current len 0x{:x}, end 0x{:x}, start 0x{:x}, current addr 0x{:x}", current_len, end, start, current_addr);
                             current_len -= end - current_addr;
                             current_addr = end;
                             error = false;
@@ -787,6 +818,15 @@ pub unsafe fn init_processes(cs: &CS) {
             panic!("Invalid driver ordering for programs");
         } else {
             current_driver = program.driver();
+        }
+        if program.num_sync_queues() > 32 {
+            panic!("Have invalid number of sync queues of {}", program.num_sync_queues());
+        }
+        if program.num_async_queues() > 32 {
+            panic!("Have invalid number of async queues of {}", program.num_async_queues());
+        }
+        if program.num_notifier_queues() > 32 {
+            panic!("Have invalid number of notifier queues of {}", program.num_notifier_queues());
         }
         for region in &mut program.regions {
             if region.enabled() {

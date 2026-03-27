@@ -11,8 +11,9 @@ debug_src = "target/thumbv6m-none-eabi/debug/test_driver"
 release_src = "target/thumbv6m-none-eabi/release/test_driver"
 num_sync_queues = 0
 async_queues = []
-sync_endpoints = [{ name = "uart", queue = 0 }, { name = "adc", queue = 0 }]
+sync_endpoints = [{ name = "uart", queue = 0 }, { name = "adc", queue = 0 }, { name = "camera", queue = 0 }]
 async_endpoints = []
+num_notifiers = 0
 block_len = 247
 
 [[programs]]
@@ -26,6 +27,7 @@ num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "io_bank0", queue = 0 }]
 async_endpoints = []
+num_notifiers = 0
 block_len = 247
 
 [[programs]]
@@ -38,6 +40,7 @@ num_sync_queues = 1
 async_queues = []
 sync_endpoints = []
 async_endpoints = []
+num_notifiers = 0
 block_len = 247
 
 [[programs]]
@@ -50,6 +53,7 @@ num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "reset", queue = 0 }, { name = "pads_bank0", queue = 0 }]
 async_endpoints = []
+num_notifiers = 0
 block_len = 247
 
 [[programs]]
@@ -62,6 +66,7 @@ num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "reset", queue = 0 }]
 async_endpoints = []
+num_notifiers = 0
 block_len = 247
 
 [[programs]]
@@ -75,6 +80,7 @@ num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "io_bank0", queue = 0 }]
 async_endpoints = []
+num_notifiers = 0
 block_len = 247
 
 #[[programs]]
@@ -88,11 +94,12 @@ block_len = 247
 #async_queues = []
 #sync_endpoints = [{ name = "io_bank0", queue = 0 }]
 #async_endpoints = []
+#num_notifiers = 0
 #block_len = 247
 
 [[programs]]
 name = "spi"
-priority = 0
+priority = 3
 driver = "SPI0"
 pins = [16, 17, 18, 19]
 debug_src = "target/thumbv6m-none-eabi/debug/spi"
@@ -101,4 +108,44 @@ num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "io_bank0", queue = 0 }]
 async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "camera"
+priority = 3
+debug_src = "target/thumbv6m-none-eabi/debug/camera"
+release_src = "target/thumbv6m-none-eabi/release/camera"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "spi", queue = 0 }, { name = "i2c", queue = 0 }, { name = "timer", queue = 0 }]
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "i2c"
+priority = 3
+driver = "I2C0"
+pins = [20, 21]
+debug_src = "target/thumbv6m-none-eabi/debug/i2c"
+release_src = "target/thumbv6m-none-eabi/release/i2c"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "io_bank0", queue = 0 }]
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "timer"
+priority = 3
+driver = "Timer"
+debug_src = "target/thumbv6m-none-eabi/debug/timer"
+release_src = "target/thumbv6m-none-eabi/release/timer"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "reset", queue = 0 }]
+async_endpoints = []
+num_notifiers = 4
 block_len = 247

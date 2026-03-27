@@ -8,8 +8,8 @@
 #[derive(Debug, Clone)]
 pub struct MessageHeader {
     pub pid: u32,
-    pub driver: u32,
-    pub tag: u32,
+    pub pin_mask: u32,
+    pub driver_tag: u32,
     pub len: u32,
 }
 

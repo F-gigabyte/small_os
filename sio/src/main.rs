@@ -1,9 +1,7 @@
-#![feature(core_intrinsics)]
-
 #![no_std]
 #![no_main]
 
-use core::{intrinsics::abort, panic::PanicInfo, ptr::{self, NonNull}};
+use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, WriteOnly}};
 use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, read_header, receive, reply, reply_empty, send_empty};
@@ -223,13 +221,6 @@ impl Request {
             }
         }
     }
-}
-
-/// panic handler
-/// this function is called when a panic happens
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    abort()
 }
 
 const IO_BANK0_QUEUE: u32 = 0;

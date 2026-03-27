@@ -1,9 +1,7 @@
-// use core intrinsics
-#![feature(core_intrinsics)]
 #![no_std]
 #![no_main]
 
-use core::{intrinsics::abort, panic::PanicInfo, ptr, slice};
+use core::ptr;
 
 use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, read_header, receive, reply_empty, send_empty};
 
@@ -142,7 +140,8 @@ pub const MAX_GPIO: u8 = 31;
 pub enum GPIOState {
     Disable = 0,
     Normal = 1,
-    Analog = 2
+    Analog = 2,
+    PullUp = 3,
 }
 
 impl TryFrom<u8> for GPIOState {
@@ -153,6 +152,7 @@ impl TryFrom<u8> for GPIOState {
             0 => Ok(Self::Disable),
             1 => Ok(Self::Normal),
             2 => Ok(Self::Analog),
+            3 => Ok(Self::PullUp),
             _ => Err(value)
         }
     }
@@ -183,6 +183,7 @@ impl PadsBank0 {
             GPIOState::Disable => self.disable_gpio(gpio),
             GPIOState::Normal => self.set_gpio_normal(gpio),
             GPIOState::Analog => self.set_gpio_analog(gpio),
+            GPIOState::PullUp => self.set_gpio_pull_up(gpio),
         }
     }
 
@@ -214,6 +215,20 @@ impl PadsBank0 {
         }
     }
 
+    pub fn set_gpio_pull_up(&mut self, gpio: u8) {
+        assert!(gpio < MAX_GPIO);
+        let pad_ptr = unsafe {
+            self.registers.add((gpio as usize) + 1)
+        };
+        let val = gpio_register::DRIVE_4MA | 
+            gpio_register::PULL_UP_ENABLE_MASK | 
+            gpio_register::INPUT_ENABLE_MASK |
+            gpio_register::SCHMITT_MASK;
+        unsafe {
+            pad_ptr.write_volatile(val);
+        }
+    }
+
     pub fn disable_gpio(&mut self, gpio: u8) {
         assert!(gpio < MAX_GPIO);
         let pad_ptr = unsafe {
@@ -224,13 +239,6 @@ impl PadsBank0 {
             pad_ptr.write_volatile(val);
         }
     }
-}
-
-/// panic handler
-/// this function is called when a panic happens
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    abort()
 }
 
 const RESET_QUEUE: u32 = 0;

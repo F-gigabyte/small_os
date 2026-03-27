@@ -28,6 +28,8 @@ pub enum SysCall {
     // 2
     WaitIRQ {},
     // 3
+    ClearIRQ {},
+    // 4
     Send {
         endpoint: u32,
         tag: u32,
@@ -35,44 +37,82 @@ pub enum SysCall {
         len: u32,
         data: *mut u8
     },
-    // 4
+    // 5
     SendAsync {
         endpoint: u32,
         tag: u32,
         len: u32,
         data: *mut u8
     },
-    // 5
+    // 6
+    NotifySend {
+        queue: u32,
+        notifier: u32
+    },
+    // 7
+    WaitQueues {
+        queue_mask: u32
+    },
+    // 8
+    WaitQueuesAsync {
+        queue_mask: u32
+    },
+    // 9
+    WaitQueuesIRQ {
+        queue_mask: u32
+    },
+    // 10
+    WaitQueuesIRQAsync {
+        queue_mask: u32
+    },
+    // 11
     Header {
         queue: u32
     },
-    // 6
+    // 12
     HeaderAsync {
         queue: u32
     },
-    // 7
+    // 13
     HeaderNonBlocking {
         queue: u32,
     },
-    // 8
+    // 14
     HeaderAsyncNonBlocking {
         queue: u32,
     },
-    // 9
+    // 15
+    NotifyHeader {
+        notifier: u32
+    },
+    // 16
     Receive {
         queue: u32,
         len: u32,
         buffer: *mut u8
     },
-    // 10
+    // 17
     ReceiveAsync {
         queue: u32,
         len: u32,
         buffer: *mut u8
     },
-    // 11
+    // 18
+    NotifyReceive {
+        notifier: u32,
+        len: u32,
+        buffer: *mut u8
+    },
+    // 19
     Reply {
         queue: u32,
+        msg: u32,
+        len: u32,
+        buffer: *const u8
+    },
+    // 20
+    NotifyReply {
+        notifier: u32,
         msg: u32,
         len: u32,
         buffer: *const u8
@@ -112,33 +152,63 @@ impl TryFrom<&StackTrace> for SysCall {
                 len: stack.r2,
                 data: ptr::with_exposed_provenance_mut(stack.r3 as usize)
             }),
-            5 => Ok(SysCall::Header { 
+            5 => Ok(SysCall::NotifySend { 
+                queue: stack.r0, 
+                notifier: stack.r1 
+            }),
+            6 => Ok(SysCall::WaitQueues { 
+                queue_mask: stack.r0 
+            }),
+            7 => Ok(SysCall::WaitQueuesAsync { 
+                queue_mask: stack.r0 
+            }),
+            8 => Ok(SysCall::WaitQueuesIRQ { 
+                queue_mask: stack.r0 
+            }),
+            9 => Ok(SysCall::WaitQueuesIRQAsync { 
+                queue_mask: stack.r0 
+            }),
+            10 => Ok(SysCall::Header { 
                 queue: stack.r0,
             }),
-            6 => Ok(SysCall::HeaderAsync { 
+            11 => Ok(SysCall::HeaderAsync { 
                 queue: stack.r0 
             }),
-            7 => Ok(SysCall::HeaderNonBlocking { 
-                queue: stack.r0, 
+            12 => Ok(SysCall::HeaderNonBlocking { 
+                queue: stack.r0 
             }),
-            8 => Ok(SysCall::HeaderAsyncNonBlocking {
-                queue: stack.r0,
+            13 => Ok(SysCall::HeaderAsyncNonBlocking {
+                queue: stack.r0
             }),
-            9 => Ok(SysCall::Receive { 
-                queue: stack.r0, 
-                len: stack.r1, 
-                buffer: ptr::with_exposed_provenance_mut(stack.r2 as usize) 
+            14 => Ok(SysCall::NotifyHeader { 
+                notifier: stack.r0
             }),
-            10 => Ok(SysCall::ReceiveAsync { 
+            15 => Ok(SysCall::Receive { 
                 queue: stack.r0, 
                 len: stack.r1, 
                 buffer: ptr::with_exposed_provenance_mut(stack.r2 as usize) 
             }),
-            11 => Ok(SysCall::Reply { 
+            16 => Ok(SysCall::ReceiveAsync { 
+                queue: stack.r0, 
+                len: stack.r1, 
+                buffer: ptr::with_exposed_provenance_mut(stack.r2 as usize) 
+            }),
+            17 => Ok(SysCall::NotifyReceive { 
+                notifier: stack.r0, 
+                len: stack.r1, 
+                buffer: ptr::with_exposed_provenance_mut(stack.r2 as usize) 
+            }),
+            18 => Ok(SysCall::Reply { 
                 queue: stack.r0, 
                 msg: stack.r1,
                 len: stack.r2,
                 buffer: ptr::with_exposed_provenance(stack.r3 as usize)
+            }),
+            19 => Ok(SysCall::NotifyReply { 
+                notifier: stack.r0, 
+                msg: stack.r1, 
+                len: stack.r2, 
+                buffer: ptr::with_exposed_provenance(stack.r3 as usize) 
             }),
             _ => Err(())
         }
@@ -253,12 +323,9 @@ pub extern "C" fn irq_handler(irq: u8) -> *mut Proc {
     let cs = unsafe {
         CS::new()
     };
-    let mut nvic = NVIC.lock(&cs);
-    nvic.clear_pending_irq(irq);
     let mut scheduler = scheduler(&cs);
     let prev = scheduler.get_current();
-    scheduler.wake(irq);
-    nvic.disable_irq(irq);
+    scheduler.wake(irq, &cs);
     // only switch out if current is blocked or its time slice expired
     scheduler.next_current_process();
     let current = scheduler.get_current();
@@ -289,24 +356,12 @@ fn do_sys_call(sys_call: SysCall, cs: &CS) -> Result<(), u32> {
         // wait for IRQ
         SysCall::WaitIRQ {} => {
             let mut scheduler = scheduler(cs);
-            let current = scheduler.get_current();
-            let program = unsafe {
-                & *(*current).program
-            };
-
-            if program.has_interrupt() {
-                scheduler.sleep_irq();
-                let mut nvic = NVIC.lock(&cs);
-                // enable the IRQs for firing
-                for inter in program.interrupts() {
-                    if *inter < 32 {
-                        nvic.enable_irq(*inter);
-                    }
-                }
-                Ok(())
-            } else {
-                Err(u32::from(IRQError::NoIRQ))
-            }
+            scheduler.sleep_irq(&cs).map_err(|err| u32::from(err))
+        },
+        // clear IRQ mask
+        SysCall::ClearIRQ {} => {
+            let mut scheduler = scheduler(cs);
+            scheduler.clear_irq(cs).map_err(|err| u32::from(err))
         },
         // send message
         SysCall::Send { 
@@ -328,6 +383,37 @@ fn do_sys_call(sys_call: SysCall, cs: &CS) -> Result<(), u32> {
             unsafe {
                 scheduler.send_async(endpoint, tag, len, data).map_err(|err| u32::from(err))
             }
+        },
+        SysCall::NotifySend { 
+            queue, 
+            notifier 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.notify_send(queue, notifier).map_err(|err| u32::from(err))
+        },
+        SysCall::WaitQueues {
+            queue_mask 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.wait_queues(queue_mask, false, cs).map_err(|err| u32::from(err))
+        },
+        SysCall::WaitQueuesAsync {
+            queue_mask 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.wait_queues_async(queue_mask, false, cs).map_err(|err| u32::from(err))
+        },
+        SysCall::WaitQueuesIRQ {
+            queue_mask 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.wait_queues(queue_mask, true, cs).map_err(|err| u32::from(err))
+        },
+        SysCall::WaitQueuesIRQAsync {
+            queue_mask 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.wait_queues_async(queue_mask, true, cs).map_err(|err| u32::from(err))
         },
         SysCall::Header { 
             queue 
@@ -353,6 +439,12 @@ fn do_sys_call(sys_call: SysCall, cs: &CS) -> Result<(), u32> {
             let mut scheduler = scheduler(cs);
             scheduler.header_async(queue, false).map_err(|err| u32::from(err))
         },
+        SysCall::NotifyHeader { 
+            notifier 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.notify_header(notifier).map_err(|err| u32::from(err))
+        },
         SysCall::Receive { 
             queue, 
             len, 
@@ -373,6 +465,16 @@ fn do_sys_call(sys_call: SysCall, cs: &CS) -> Result<(), u32> {
                 scheduler.receive_message_async(queue, len, buffer).map_err(|err| u32::from(err))
             }
         },
+        SysCall::NotifyReceive { 
+            notifier, 
+            len, 
+            buffer 
+        } => {
+            let mut scheduler = scheduler(cs);
+            unsafe {
+                scheduler.notify_receive_message(notifier, len, buffer).map_err(|err| u32::from(err))
+            }
+        },
         SysCall::Reply { 
             queue, 
             msg,
@@ -381,6 +483,15 @@ fn do_sys_call(sys_call: SysCall, cs: &CS) -> Result<(), u32> {
         } => {
             let mut scheduler = scheduler(cs);
             scheduler.reply(queue, msg, len, buffer).map_err(|err| u32::from(err))
+        },
+        SysCall::NotifyReply { 
+            notifier, 
+            msg, 
+            len, 
+            buffer 
+        } => {
+            let mut scheduler = scheduler(cs);
+            scheduler.notify_reply(notifier, msg, len, buffer).map_err(|err| u32::from(err))
         },
     }
 }

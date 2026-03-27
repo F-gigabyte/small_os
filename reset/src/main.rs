@@ -1,9 +1,6 @@
-#![feature(core_intrinsics)]
-
 #![no_std]
 #![no_main]
 
-use core::{intrinsics::abort, panic::PanicInfo};
 use core::{ptr::{self, NonNull}};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadOnly, ReadPureWrite, WriteOnly}};
@@ -73,13 +70,6 @@ impl Reset {
             do_yield().unwrap();
         }
     }
-}
-
-/// panic handler
-/// this function is called when a panic happens
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    abort()
 }
 
 pub enum ResetReplyError {

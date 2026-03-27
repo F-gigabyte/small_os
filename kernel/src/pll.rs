@@ -65,7 +65,7 @@ impl PLL {
 
     pub fn reset_sys(&mut self) {
         let ref_div = 1 << cs_register::REF_DIV_SHIFT;
-        let fbdiv = 128 << fbdiv_int_register::VALUE_SHIFT;
+        let fbdiv = 133 << fbdiv_int_register::VALUE_SHIFT;
         let pd1 = 6 << prim_register::POSTDIV1_SHIFT;
         let pd2 = 2 << prim_register::POSTDIV2_SHIFT;
         let prim = pd1 | pd2;

@@ -12,29 +12,33 @@ pub struct SyncMessageQueue {
 }
 
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueError {
     QueueEmpty,
     BufferTooSmall,
     QueueFull,
     InvalidQueue(u32),
+    InvalidNotifer(u32),
     BufferTooLarge,
     Died,
     InvalidMemoryAccess,
-    SenderInvalidMemoryAccess
+    SenderInvalidMemoryAccess,
+    NoQueueMask
 }
 
 impl From<QueueError> for u32 {
     fn from(value: QueueError) -> Self {
         match value {
             QueueError::InvalidQueue(_) => 0,
-            QueueError::QueueEmpty => 1,
-            QueueError::QueueFull => 2,
-            QueueError::BufferTooSmall => 3,
-            QueueError::BufferTooLarge => 4,
-            QueueError::Died => 5,
-            QueueError::InvalidMemoryAccess => 6,
-            QueueError::SenderInvalidMemoryAccess => 7,
+            QueueError::InvalidNotifer(_) => 1,
+            QueueError::QueueEmpty => 2,
+            QueueError::QueueFull => 3,
+            QueueError::BufferTooSmall => 4,
+            QueueError::BufferTooLarge => 5,
+            QueueError::Died => 6,
+            QueueError::InvalidMemoryAccess => 7,
+            QueueError::SenderInvalidMemoryAccess => 8,
+            QueueError::NoQueueMask => 9
         }
     }
 }
@@ -47,14 +51,9 @@ impl SyncMessageQueue {
             blocked: ptr::null_mut()
         }
     }
-    
-    /// SAFETY
-    /// `proc` must be a valid process and blocked
-    pub unsafe fn send(&mut self, proc: *mut Proc) {
-        let proc = unsafe {
-            &mut *proc
-        };
-        proc.next = ptr::null_mut();
+
+    fn push_back(&mut self, proc: *mut Proc) {
+        assert!(!proc.is_null());
         if self.back.is_null() {
             self.front = proc;
             self.back = proc;
@@ -63,7 +62,27 @@ impl SyncMessageQueue {
                 &mut *self.back
             };
             back.next = proc;
+            self.back = proc;
         }
+    }
+
+    fn pop_front<'a>(&mut self, front: &'a mut Proc) -> &'a mut Proc {
+        assert!(self.front == front);
+        self.front = front.next;
+        if self.front.is_null() {
+            self.back = ptr::null_mut();
+        }
+        front
+    }
+    
+    /// SAFETY
+    /// `proc` must be a valid process and blocked
+    pub unsafe fn send(&mut self, proc: *mut Proc) {
+        let proc = unsafe {
+            &mut *proc
+        };
+        proc.next = ptr::null_mut();
+        self.push_back(proc);
     }
 
     pub fn read_header(&mut self) -> Result<MessageHeader, QueueError> {
@@ -87,8 +106,9 @@ impl SyncMessageQueue {
         };
         Ok(MessageHeader { 
             pid: front.get_pid(), 
-            driver: front.get_driver() as u32,
-            tag: front.get_r1().map_err(|_| QueueError::SenderInvalidMemoryAccess)?, // r1 contains message tag 
+            driver_tag: ((front.get_driver() as u32) << 16) | 
+                (front.get_r1().map_err(|_| QueueError::SenderInvalidMemoryAccess)? & 0xffff), // r1 contains message tag 
+            pin_mask: front.get_pin_mask(),
             len: front.get_r2().map_err(|_| QueueError::SenderInvalidMemoryAccess)? // r2 contains message length
         })
     }
@@ -103,10 +123,7 @@ impl SyncMessageQueue {
         if front.get_state() == ProcState::Dead {
             // if front died, remove from queue and free it
             front.set_state(ProcState::Free);
-            self.front = front.next;
-            if self.front.is_null() {
-                self.back = ptr::null_mut();
-            }
+            self.pop_front(front);
             return Err(QueueError::Died);
         }
         let len = front.get_r2().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
@@ -118,10 +135,58 @@ impl SyncMessageQueue {
         }
         // check access is valid
         // write message
-        front.read_bytes(data, buffer_len).map_err(|_| QueueError::SenderInvalidMemoryAccess)
+        front.read_bytes(data, len).map_err(|_| QueueError::SenderInvalidMemoryAccess)
     }
     
-    pub fn reply(&mut self, msg: u32, buffer: Option<&[u8]>) -> Result<*mut Proc, QueueError> {
+    pub fn reply(&mut self, msg: u32, buffer: Option<&[u8]>) -> Result<*mut Proc, (*mut Proc, QueueError)> {
+        if self.front.is_null() {
+            return Err((ptr::null_mut(), QueueError::QueueEmpty));
+        }
+        let front = unsafe {
+            &mut *self.front
+        };
+        if front.get_state() == ProcState::Dead {
+            // if front died, remove from queue and free it
+            front.set_state(ProcState::Free);
+            self.pop_front(front);
+            return Err((ptr::null_mut(), QueueError::Died));
+        }
+        let (len, data) = {
+            let len = front.get_r2().map_err(|_| {
+                self.pop_front(front);
+                (front as *mut _, QueueError::SenderInvalidMemoryAccess)
+            })?;
+            let data = front.get_r3().map_err(|_| {
+                self.pop_front(front);
+                (front as *mut _, QueueError::SenderInvalidMemoryAccess)
+            })?;
+            (len, data)
+        };
+        // mask out reply len
+        let len = ((len >> 16) & 0xffff) as usize;
+        let reply_len = if let Some(buffer) = buffer {
+            if buffer.len() > len {
+                return Err((ptr::null_mut(), QueueError::BufferTooLarge));
+            }
+            if len > 0 {
+                // check access is valid
+                // write reply
+                front.write_bytes(data, buffer).map_err(|_| {
+                    self.pop_front(front);
+                    (front as *mut _, QueueError::SenderInvalidMemoryAccess)
+                })?;
+            }
+            buffer.len() as u32
+        } else {
+            0
+        };
+        _ = front.set_r0(msg);
+        _ = front.set_r1(reply_len);
+        self.pop_front(front);
+        Ok(front)
+    }
+
+    pub fn take(&mut self) -> Result<*mut Proc, QueueError> {
         if self.front.is_null() {
             return Err(QueueError::QueueEmpty);
         }
@@ -131,39 +196,20 @@ impl SyncMessageQueue {
         if front.get_state() == ProcState::Dead {
             // if front died, remove from queue and free it
             front.set_state(ProcState::Free);
-            self.front = front.next;
-            if self.front.is_null() {
-                self.back = ptr::null_mut();
-            }
+            self.pop_front(front);
             return Err(QueueError::Died);
         }
-        let (len, data) = {
-            let len = front.get_r2().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
-            let data = front.get_r3().map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
-            (len, data)
-        };
-        // mask out reply len
-        let len = ((len >> 16) & 0xffff) as usize;
-        let reply_len = if let Some(buffer) = buffer {
-            if buffer.len() > len {
-                return Err(QueueError::BufferTooLarge);
-            }
-            if len > 0 {
-                // check access is valid
-                // write reply
-                front.write_bytes(data, buffer).map_err(|_| QueueError::SenderInvalidMemoryAccess)?;
-            }
-            buffer.len() as u32
-        } else {
-            0
-        };
-        _ = front.set_r0(msg);
-        _ = front.set_r1(reply_len);
-        self.front = front.next;
-        if self.front.is_null() {
-            self.back = ptr::null_mut();
-        }
-        Ok(front)
+        Ok(self.pop_front(front))
+    }
+
+    pub fn put(&mut self, proc: *mut Proc) {
+        assert!(!proc.is_null());
+        self.push_back(proc);
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.front.is_null()
     }
 }
 
@@ -268,6 +314,11 @@ impl AsyncMessageQueue {
         } else {
             Err(QueueError::QueueEmpty)
         }
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&mut self) -> bool {
+        self.len == 0
     }
 }
 
