@@ -4,7 +4,7 @@ fn main() {
     // rerun if this build script changes
     println!("cargo::rerun-if-changed=test_driver/build.rs");
     // use link.ld linker script
-    println!("cargo::rustc-link-arg=-Tdriver.ld");
+    println!("cargo::rustc-link-arg=-Tdriver3.ld");
     // build relocatable code
     println!("cargo::rustc-link-arg=-r");
 }

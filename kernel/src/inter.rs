@@ -1,6 +1,6 @@
-use core::{arch::asm, marker::PhantomData, ptr};
+use core::{arch::asm, marker::PhantomData, ptr, slice};
 
-use crate::{nvic::NVIC, println, proc::Proc, program::AccessAttr, scheduler::{QUANTUM_MICROS, get_current_proc, scheduler}, sys_tick::SYS_TICK, system::{SYSTEM, SysIRQ}, timer::{TIMER, TimerIRQ}};
+use crate::{nvic::NVIC, print, println, proc::Proc, program::AccessAttr, scheduler::{QUANTUM_MICROS, get_current_proc, scheduler}, sys_tick::SYS_TICK, system::{SYSTEM, SysIRQ}, timer::{TIMER, TimerIRQ}};
 
 // https://aticleworld.com/arm-function-call-stack-frame/ accessed 4/02/2026 mentions r0 to r3, r12
 // and lr (r14) are caller saved so use r0 to r3 as arguments and r12 as sys call number so
@@ -117,6 +117,11 @@ pub enum SysCall {
         len: u32,
         buffer: *const u8
     },
+    // 21
+    KPrint {
+        len: u32,
+        buffer: *const u8
+    },
 }
 
 pub enum IRQError {
@@ -131,6 +136,20 @@ impl From<IRQError> for u32 {
     }
 }
 
+pub enum KPrintError {
+    InvalidAccess,
+    NotUTF8
+}
+
+impl From<KPrintError> for u32 {
+    fn from(value: KPrintError) -> Self {
+        match value {
+            KPrintError::InvalidAccess => 0,
+            KPrintError::NotUTF8 => 1
+        }
+    }
+}
+
 impl TryFrom<&StackTrace> for SysCall {
     type Error = ();
     fn try_from(stack: &StackTrace) -> Result<Self, ()> {
@@ -140,75 +159,80 @@ impl TryFrom<&StackTrace> for SysCall {
                 code: stack.r0
             }),
             2 => Ok(SysCall::WaitIRQ {}),
-            3 => Ok(SysCall::Send { 
+            3 => Ok(SysCall::ClearIRQ {}),
+            4 => Ok(SysCall::Send { 
                 endpoint: stack.r0,
                 tag: stack.r1,
                 len: stack.r2,
                 data: ptr::with_exposed_provenance_mut(stack.r3 as usize)
             }),
-            4 => Ok(SysCall::SendAsync { 
+            5 => Ok(SysCall::SendAsync { 
                 endpoint: stack.r0,
                 tag: stack.r1,
                 len: stack.r2,
                 data: ptr::with_exposed_provenance_mut(stack.r3 as usize)
             }),
-            5 => Ok(SysCall::NotifySend { 
+            6 => Ok(SysCall::NotifySend { 
                 queue: stack.r0, 
                 notifier: stack.r1 
             }),
-            6 => Ok(SysCall::WaitQueues { 
+            7 => Ok(SysCall::WaitQueues { 
                 queue_mask: stack.r0 
             }),
-            7 => Ok(SysCall::WaitQueuesAsync { 
+            8 => Ok(SysCall::WaitQueuesAsync { 
                 queue_mask: stack.r0 
             }),
-            8 => Ok(SysCall::WaitQueuesIRQ { 
+            9 => Ok(SysCall::WaitQueuesIRQ { 
                 queue_mask: stack.r0 
             }),
-            9 => Ok(SysCall::WaitQueuesIRQAsync { 
+            10 => Ok(SysCall::WaitQueuesIRQAsync { 
                 queue_mask: stack.r0 
             }),
-            10 => Ok(SysCall::Header { 
+            11 => Ok(SysCall::Header { 
                 queue: stack.r0,
             }),
-            11 => Ok(SysCall::HeaderAsync { 
+            12 => Ok(SysCall::HeaderAsync { 
                 queue: stack.r0 
             }),
-            12 => Ok(SysCall::HeaderNonBlocking { 
+            13 => Ok(SysCall::HeaderNonBlocking { 
                 queue: stack.r0 
             }),
-            13 => Ok(SysCall::HeaderAsyncNonBlocking {
+            14 => Ok(SysCall::HeaderAsyncNonBlocking {
                 queue: stack.r0
             }),
-            14 => Ok(SysCall::NotifyHeader { 
+            15 => Ok(SysCall::NotifyHeader { 
                 notifier: stack.r0
             }),
-            15 => Ok(SysCall::Receive { 
+            16 => Ok(SysCall::Receive { 
                 queue: stack.r0, 
                 len: stack.r1, 
                 buffer: ptr::with_exposed_provenance_mut(stack.r2 as usize) 
             }),
-            16 => Ok(SysCall::ReceiveAsync { 
+            17 => Ok(SysCall::ReceiveAsync { 
                 queue: stack.r0, 
                 len: stack.r1, 
                 buffer: ptr::with_exposed_provenance_mut(stack.r2 as usize) 
             }),
-            17 => Ok(SysCall::NotifyReceive { 
+            18 => Ok(SysCall::NotifyReceive { 
                 notifier: stack.r0, 
                 len: stack.r1, 
                 buffer: ptr::with_exposed_provenance_mut(stack.r2 as usize) 
             }),
-            18 => Ok(SysCall::Reply { 
+            19 => Ok(SysCall::Reply { 
                 queue: stack.r0, 
                 msg: stack.r1,
                 len: stack.r2,
                 buffer: ptr::with_exposed_provenance(stack.r3 as usize)
             }),
-            19 => Ok(SysCall::NotifyReply { 
+            20 => Ok(SysCall::NotifyReply { 
                 notifier: stack.r0, 
                 msg: stack.r1, 
                 len: stack.r2, 
                 buffer: ptr::with_exposed_provenance(stack.r3 as usize) 
+            }),
+            21 => Ok(SysCall::KPrint { 
+                len: stack.r0, 
+                buffer: stack.r1 as *const u8 
             }),
             _ => Err(())
         }
@@ -492,6 +516,22 @@ fn do_sys_call(sys_call: SysCall, cs: &CS) -> Result<(), u32> {
         } => {
             let mut scheduler = scheduler(cs);
             scheduler.notify_reply(notifier, msg, len, buffer).map_err(|err| u32::from(err))
+        },
+        SysCall::KPrint { 
+            len, 
+            buffer 
+        } => {
+            let mut scheduler = scheduler(cs);
+            let current = unsafe {
+                &mut *scheduler.get_current()
+            };
+            current.check_access(buffer as u32, len, AccessAttr::new(true, false, false)).map_err(|_| u32::from(KPrintError::InvalidAccess))?;
+            let buffer = unsafe {
+                slice::from_raw_parts(buffer, len as usize)
+            };
+            let buffer = str::from_utf8(buffer).map_err(|_| u32::from(KPrintError::NotUTF8))?;
+            print!("{}", buffer);
+            Ok(())
         },
     }
 }

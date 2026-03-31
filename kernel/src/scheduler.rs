@@ -1,6 +1,6 @@
 use core::{cell::UnsafeCell, ptr, slice};
 
-use crate::{inter::{CS, IRQError}, message_queue::{AsyncMessageQueue, QueueError, SyncMessageQueue}, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, nvic::NVIC, println, proc::{Proc, ProcError, ProcState}, program::{__args, AccessAttr, Program}};
+use crate::{inter::{CS, IRQError}, message_queue::{AsyncMessageQueue, QueueError, SyncMessageQueue}, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, nvic::NVIC, proc::{Proc, ProcError, ProcState}, program::{__args, AccessAttr, Program}};
 
 // If this is changed, must change Proc struct
 const NUM_PRIORITIES: usize = 256;
@@ -265,30 +265,31 @@ impl Scheduler {
                 let kernel_args = &__args;
                 let mut arg_len = 0;
                 if driver != 0 {
-                    args[arg_len] = program.regions[0].get_runtime_addr().unwrap();
+                    args[arg_len + 1] = program.regions[0].get_runtime_addr().unwrap();
                     arg_len += 1;
                     if driver == 6 {
                         // IO Bank 0
-                        args[arg_len] = kernel_args.pin_func[0];
-                        args[arg_len + 1] = kernel_args.pin_func[1];
-                        args[arg_len + 2] = kernel_args.pin_func[2];
-                        args[arg_len + 3] = kernel_args.pin_func[3];
+                        args[arg_len + 1] = kernel_args.pin_func[0];
+                        args[arg_len + 2] = kernel_args.pin_func[1];
+                        args[arg_len + 3] = kernel_args.pin_func[2];
+                        args[arg_len + 4] = kernel_args.pin_func[3];
                         arg_len += 4;
                     } else if driver == 8 {
                         // Pads bank 0
-                        args[arg_len] = kernel_args.pads[0];
-                        args[arg_len + 1] = kernel_args.pads[1];
+                        args[arg_len + 1] = kernel_args.pads[0];
+                        args[arg_len + 2] = kernel_args.pads[1];
                         arg_len += 2;
                     } else if driver == 27 {
                         // Resets
-                        args[arg_len] = kernel_args.resets;
+                        args[arg_len + 1] = kernel_args.resets;
                         arg_len += 1;
                     }
                 }
                 if program.pin_mask != 0 {
-                    args[arg_len] = program.pin_mask;
+                    args[arg_len + 1] = program.pin_mask;
                     arg_len += 1;
                 }
+                args[0] = arg_len as u32;
 
                 // reset region data
                 for region in &mut program.regions {
@@ -309,7 +310,7 @@ impl Scheduler {
                 }
                 current.init(
                     &mut *program, 
-                    &args[..arg_len]
+                    &args[..arg_len + 1]
                 ).unwrap();
                 self.schedule_process(current.get_pid()).unwrap();
             }
@@ -584,7 +585,6 @@ impl Scheduler {
             & *proc.program
         };
         let pending = nvic.get_pending();
-        println!("Pending ({}) is 0x{:x}", proc.get_pid(), pending);
         let mut mask = proc.get_irq_mask();
         for (i, inter) in program.interrupts().iter().enumerate() {
             if *inter < 32 && pending & (1 << *inter) != 0 {
@@ -593,7 +593,6 @@ impl Scheduler {
             }
         }
         let pending = nvic.get_pending();
-        println!("Pending is now 0x{:x}", pending);
         proc.clear_irqs();
         mask
     }

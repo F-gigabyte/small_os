@@ -101,7 +101,7 @@ impl Timer {
     #[inline(always)]
     pub fn clear_irq(&mut self, timer: u8) {
         assert!(timer < 4);
-        field!(self.clear_reg, int_raw).write(1 << timer);
+        field!(self.set_reg, int_raw).write(1 << timer);
     }
 
     pub fn set_timer0(&mut self, count: u32) {

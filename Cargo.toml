@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["adc", "camera", "i2c", "io_bank0", "kernel", "pads_bank0", "reset", "sio", "small_os_lib", "spi", "test_driver", "uart", "timer"]
+members = ["adc", "camera", "i2c", "io_bank0", "kernel", "pads_bank0", "reset", "sio", "small_os_lib", "spi", "test_driver", "uart", "timer", "kermit"]
 
 [profile.release]
 debug = "full"

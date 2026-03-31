@@ -11,7 +11,7 @@ debug_src = "target/thumbv6m-none-eabi/debug/test_driver"
 release_src = "target/thumbv6m-none-eabi/release/test_driver"
 num_sync_queues = 0
 async_queues = []
-sync_endpoints = [{ name = "uart", queue = 0 }, { name = "adc", queue = 0 }, { name = "camera", queue = 0 }]
+sync_endpoints = [{ name = "uart", queue = 0 }, { name = "adc", queue = 0 }, { name = "camera", queue = 0 }, { name = "kermit", queue = 0 }]
 async_endpoints = []
 num_notifiers = 0
 block_len = 247
@@ -148,4 +148,16 @@ async_queues = []
 sync_endpoints = [{ name = "reset", queue = 0 }]
 async_endpoints = []
 num_notifiers = 4
+block_len = 247
+
+[[programs]]
+name = "kermit"
+priority = 3
+debug_src = "target/thumbv6m-none-eabi/debug/kermit"
+release_src = "target/thumbv6m-none-eabi/release/kermit"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "uart", queue = 0 }]
+async_endpoints = []
+num_notifiers = 0
 block_len = 247

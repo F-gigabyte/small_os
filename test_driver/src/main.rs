@@ -3,7 +3,7 @@
 
 use core::fmt::{self, Write};
 
-use small_os_lib::{send, send_empty};
+use small_os_lib::{kprintln, send, send_empty};
 
 struct UARTPrint {}
 
@@ -40,6 +40,22 @@ pub fn _print(args: fmt::Arguments) {
     res.unwrap();
 }
 
+const ADC_QUEUE: u32 = 1;
+const CAMERA_QUEUE: u32 = 2;
+const KERMIT_QUEUE: u32 = 3;
+
+const CAMERA_IMAGE_FORMAT_TAG: u16 = 4;
+const CAMERA_CAPTURE_IMAGES_TAG: u16 = 5;
+const CAMERA_FIFO_SIZE_TAG: u16 = 6;
+const CAMERA_CAPTURES_DONE_TAG: u16 = 8;
+const CAMERA_READ_FIFO_TAG: u16 = 9;
+
+const KERMIT_START_TRANSACTION_TAG: u16 = 0;
+const KERMIT_START_FILE_TAG: u16 = 1;
+const KERMIT_SEND_FILE_DATA_TAG: u16 = 2;
+const KERMIT_FINISH_FILE_TAG: u16 = 3;
+const KERMIT_END_TRANSACTION_TAG: u16 = 4;
+
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
@@ -54,9 +70,13 @@ pub extern "C" fn main(num_args: usize) {
     send_empty(2, 1, &[18]).unwrap();
     send_empty(2, 1, &[19]).unwrap();
     */
+    send_empty(CAMERA_QUEUE, CAMERA_IMAGE_FORMAT_TAG, &[0]).unwrap();
+    send_empty(CAMERA_QUEUE, CAMERA_CAPTURE_IMAGES_TAG, &[1]).unwrap();
+    let mut prev_cap_done = false;
+    let mut prev_len_zero = false;
     loop {
         let mut temp_buffer = [2, 0];
-        send(1, 0, &mut temp_buffer, 1, 2).unwrap();
+        send(ADC_QUEUE, 0, &mut temp_buffer, 1, 2).unwrap();
         let temp = u16::from_le_bytes(temp_buffer);
         if temp & 1 == 0 {
             // based of https://microcontrollerslab.com/raspberry-pi-pico-adc-tutorial/ accessed
@@ -72,12 +92,33 @@ pub extern "C" fn main(num_args: usize) {
                 frac as u8
             };
             let int = temp / 10;
-            println!("This is test proc! ({}.{}C)\r", int, frac);
+            //println!("This is test proc! ({}.{}C)\r", int, frac);
         }
-        let mut version_info = [0; 4];
-        send(2, 4, &mut version_info, 0, 4).unwrap();
-        println!("Camera version: {}.{}\r\nYear: {}\r\nMonth: {}\r\nDate: {}", version_info[0] >> 4, version_info[0] & 0xf, version_info[1] as usize + 2000, version_info[2], version_info[3]);
-        send(2, 5, &mut version_info, 0, 2).unwrap();
-        println!("Manufacture ID: 0x{:x}", u16::from_le_bytes(version_info[..2].try_into().unwrap()));
+        let mut cap_done_buffer = [0; 1];
+        send(CAMERA_QUEUE, CAMERA_CAPTURES_DONE_TAG, &mut cap_done_buffer, 0, 1).unwrap(); 
+        let cap_done = bool::try_from(cap_done_buffer[0]).unwrap();
+        if cap_done {
+            if !prev_cap_done {
+                send_empty(KERMIT_QUEUE, KERMIT_START_TRANSACTION_TAG, &[]).unwrap();
+                send_empty(KERMIT_QUEUE, KERMIT_START_FILE_TAG, b"img2.jpeg").unwrap();
+                prev_cap_done = true;
+            }
+            let mut data = [0; 1028];
+            let len = data.len();
+            send(CAMERA_QUEUE, CAMERA_READ_FIFO_TAG, &mut data, 0, len).unwrap();
+            let data_len = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
+            if data_len > 0 {
+                let rep = (data_len + 37) / 38;
+                for i in 0..rep {
+                    let offset = i * 38;
+                    let len = 38.min(data_len - offset);
+                    send_empty(KERMIT_QUEUE, KERMIT_SEND_FILE_DATA_TAG, &data[4 + offset..4 + offset + len]).unwrap();
+                }
+            } else if !prev_len_zero {
+                send_empty(KERMIT_QUEUE, KERMIT_FINISH_FILE_TAG, &[]).unwrap();
+                send_empty(KERMIT_QUEUE, KERMIT_END_TRANSACTION_TAG, &[]).unwrap();
+                prev_len_zero = true;
+            }
+        }
     }
 }

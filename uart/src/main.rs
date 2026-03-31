@@ -4,7 +4,7 @@
 use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, ReadWrite, WriteOnly}};
-use small_os_lib::{QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, check_header_len, do_yield, read_header, receive, reply, reply_empty, send, send_empty, wait_irq};
+use small_os_lib::{HeaderError, QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, check_header_len, clear_irq, do_yield, kprintln, read_header, receive, reply, reply_empty, send, send_empty, wait_irq};
 
 #[repr(C)]
 struct UARTRegisters {
@@ -281,11 +281,11 @@ impl UART {
             field!(self.set_reg, mask_set_clr).write(interrupt_register::RX_MASK);
             true
         } else if len >= Self::SLOTS / 4 {
-            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::RX_FIFO_6);
+            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::RX_FIFO_2);
             field!(self.set_reg, mask_set_clr).write(interrupt_register::RX_MASK);
             true
         } else if len >= Self::SLOTS / 8 {
-            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::RX_FIFO_7);
+            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::RX_FIFO_1);
             field!(self.set_reg, mask_set_clr).write(interrupt_register::RX_MASK);
             true
         } else {
@@ -305,7 +305,7 @@ impl UART {
         Self::SLOTS / 8
     }
 
-    fn handle_receive(&mut self, buffer: &mut [u8]) {
+    pub fn handle_receive(&mut self, buffer: &mut [u8]) {
         let mut pos = 0;
         while pos < buffer.len() && self.wait_for_space_rx(buffer.len() - pos) {
             wait_irq().unwrap();
@@ -323,7 +323,7 @@ impl UART {
         }
     }
 
-    fn handle_send(&mut self, buffer: &[u8]) {
+    pub fn handle_send(&mut self, buffer: &[u8]) {
         let mut pos = 0;
         while pos < buffer.len() && !self.tx_full() {
             field!(self.registers, data).write(buffer[pos] as u32);
@@ -345,14 +345,26 @@ impl UART {
         }
     }
 
-    pub fn handle_request(&mut self, request: &mut Request) {
-        match request.request_type {
-            RequestType::Receive => {
-                self.handle_receive(&mut request.buffer[..request.len]);
-            },
-            RequestType::Send => {
-                self.handle_send(&request.buffer[..request.len]);
-            },
+    pub fn clear_rx(&mut self, mut len: usize) {
+        while len > 0 && self.wait_for_space_rx(len) {
+            wait_irq().unwrap();
+            field!(self.clear_reg, mask_set_clr).write(interrupt_register::RX_MASK);
+            field!(self.set_reg, inter_clr).write(interrupt_register::RX_MASK);
+            while !self.rx_empty() && len > 0 {
+                _ = field!(self.registers, data).read();
+                len -= 1;
+            }
+        }
+        while len > 0 {
+            while self.rx_empty() {}
+            _ = field!(self.registers, data).read();
+            len -= 1;
+        }
+    }
+
+    pub fn clear_all_rx(&mut self) {
+        while !self.rx_empty() {
+            _ = field!(self.registers, data).read();
         }
     }
 }
@@ -375,6 +387,15 @@ impl From<UARTReplyError> for u32 {
     }
 }
 
+impl From<HeaderError> for UARTReplyError {
+    fn from(value: HeaderError) -> Self {
+        match value {
+            HeaderError::InvalidSendBuffer => Self::InvalidSendBuffer,
+            HeaderError::InvalidReplyBuffer => Self::InvalidReplyBuffer
+        }
+    }
+}
+
 pub enum UARTError {
     ReplyError(UARTReplyError),
     QueueError(QueueError)
@@ -392,36 +413,31 @@ impl From<QueueError> for UARTError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RequestType {
-    Send,
-    Receive
-}
-
-impl TryFrom<u16> for RequestType {
-    type Error = UARTReplyError;
-    fn try_from(value: u16) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::Send),
-            1 => Ok(Self::Receive),
-            _ => Err(UARTReplyError::InvalidRequest)
-        }
+impl From<HeaderError> for UARTError {
+    fn from(value: HeaderError) -> Self {
+        Self::from(UARTReplyError::from(value))
     }
 }
 
-pub struct Request {
-    request_type: RequestType,
+pub struct DataRequest {
     buffer: [u8; 32],
     len: usize
 }
 
+pub enum Request {
+    Send(DataRequest),
+    Receive(DataRequest),
+    ClearRX(u32),
+    ClearAllRX,
+}
+
 impl Request {
     pub fn parse() -> Result<Self, UARTError> {
-        let mut buffer = [0; 32];
         let header = read_header(0)?;
-        let request = RequestType::try_from(header.tag)?;
-        let len = match request {
-            RequestType::Send => {
+        match header.tag {
+            0 => {
+                // Send
+                let mut buffer = [0; 32];
                 if header.send_len as usize > buffer.len() {
                     return Err(UARTError::ReplyError(UARTReplyError::InvalidSendBuffer));
                 }
@@ -429,23 +445,40 @@ impl Request {
                     return Err(UARTError::ReplyError(UARTReplyError::InvalidReplyBuffer));
                 }
                 _ = receive(0, &mut buffer)?;
-                header.send_len as usize
+                Ok(Self::Send(DataRequest { 
+                    buffer, 
+                    len: header.send_len as usize
+                }))
             },
-            RequestType::Receive => {
+            1 => {
+                // Receive
+                let buffer = [0; 32];
                 if header.send_len != 0 {
                     return Err(UARTError::ReplyError(UARTReplyError::InvalidSendBuffer));
                 }
                 if header.reply_len as usize > buffer.len() {
                     return Err(UARTError::ReplyError(UARTReplyError::InvalidReplyBuffer));
                 }
-                header.reply_len as usize
-            }
-        };
-        Ok(Self { 
-            request_type: request, 
-            buffer, 
-            len 
-        })
+                Ok(Self::Receive(DataRequest { 
+                    buffer, 
+                    len: header.reply_len as usize
+                }))
+            },
+            2 => {
+                // Clear RX
+                let mut buffer = [0; 4];
+                check_header_len(&header, 4, 0)?;
+                _ = receive(0, &mut buffer)?;
+                let len = u32::from_le_bytes(buffer);
+                Ok(Self::ClearRX(len))
+            },
+            3 => {
+                // Clear All RX
+                check_header_len(&header, 0, 0)?;
+                Ok(Self::ClearAllRX)
+            },
+            _ => Err(UARTError::ReplyError(UARTReplyError::InvalidRequest))
+        }
     }
 }
 
@@ -464,14 +497,23 @@ pub extern "C" fn main(num_args: usize, uart_base: usize) {
     };
     loop {
         match Request::parse() {
-            Ok(mut request) => {
-                uart.handle_request(&mut request);
-                match request.request_type {
-                    RequestType::Send => {
+            Ok(request) => {
+                match request {
+                    Request::Send(request) => {
+                        uart.handle_send(&request.buffer[..request.len]);
                         check_critical(reply_empty(0, 0)).unwrap_or(Ok(())).unwrap();
                     },
-                    RequestType::Receive => {
+                    Request::Receive(mut request) => {
+                        uart.handle_receive(&mut request.buffer[..request.len]);
                         check_critical(reply(0, 0, &request.buffer[..request.len])).unwrap_or(Ok(())).unwrap();
+                    },
+                    Request::ClearRX(len) => {
+                        uart.clear_rx(len as usize);
+                        check_critical(reply_empty(0, 0)).unwrap_or(Ok(())).unwrap();
+                    },
+                    Request::ClearAllRX => {
+                        uart.clear_all_rx();
+                        check_critical(reply_empty(0, 0)).unwrap_or(Ok(())).unwrap();
                     }
                 }
             },

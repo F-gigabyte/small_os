@@ -78,6 +78,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kermit"
+version = "0.1.0"
+dependencies = [
+ "small_os_lib",
+]
+
+[[package]]
 name = "kernel"
 version = "0.1.0"
 dependencies = [

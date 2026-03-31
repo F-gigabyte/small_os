@@ -4,12 +4,13 @@
 #![no_std]
 #![no_main]
 
-use core::{arch::asm, intrinsics::abort, panic::PanicInfo};
+use core::{arch::asm, fmt::{self, Write}, intrinsics::abort, panic::PanicInfo};
 
 /// panic handler
 /// this function is called when a panic happens
 #[panic_handler]
 pub fn panic(_info: &PanicInfo) -> ! {
+    kprintln!("{}", _info);
     abort()
 }
 
@@ -57,18 +58,18 @@ impl TryFrom<u32> for QueueError {
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
             0 => Err(()),
-            1 => Ok(QueueError::UnknownSysCall),
-            2 => Ok(QueueError::InvalidQueue),
-            3 => Ok(QueueError::InvalidNotifier),
-            4 => Ok(QueueError::QueueEmpty),
-            5 => Ok(QueueError::QueueFull),
-            6 => Ok(QueueError::BufferTooSmall),
-            7 => Ok(QueueError::BufferTooLarge),
-            8 => Ok(QueueError::Died),
-            9 => Ok(QueueError::InvalidMemoryAccess),
-            10 => Ok(QueueError::SenderInvalidMemoryAccess),
-            11 => Ok(QueueError::NoQueueMask),
-            _ => Ok(QueueError::Unknown(value))
+            1 => Ok(Self::UnknownSysCall),
+            2 => Ok(Self::InvalidQueue),
+            3 => Ok(Self::InvalidNotifier),
+            4 => Ok(Self::QueueEmpty),
+            5 => Ok(Self::QueueFull),
+            6 => Ok(Self::BufferTooSmall),
+            7 => Ok(Self::BufferTooLarge),
+            8 => Ok(Self::Died),
+            9 => Ok(Self::InvalidMemoryAccess),
+            10 => Ok(Self::SenderInvalidMemoryAccess),
+            11 => Ok(Self::NoQueueMask),
+            _ => Ok(Self::Unknown(value))
         }
     }
 }
@@ -199,7 +200,7 @@ pub fn clear_irq() -> Result<(), IRQError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 2,
+            num = in(reg) 3,
             res = out(reg) res,
         );
     }
@@ -236,7 +237,7 @@ pub fn send(target: u32, tag: u16, data: &mut [u8], send_len: usize, reply_len: 
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 3,
+            num = in(reg) 4,
             res = out(reg) res,
             inout("r0") target => reply,
             inout("r1") tag => len,
@@ -261,7 +262,7 @@ pub fn send_empty(target: u32, tag: u16, data: &[u8]) -> Result<usize, ReplyErro
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 3,
+            num = in(reg) 4,
             res = out(reg) res,
             inout("r0") target => reply,
             inout("r1") tag => len,
@@ -281,7 +282,7 @@ pub fn send_async(target: u32, tag: u16, data: &[u8]) -> Result<(), QueueError> 
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 4,
+            num = in(reg) 5,
             res = out(reg) res,
             in("r0") target,
             in("r1") tag,
@@ -299,7 +300,7 @@ pub fn notify_send(queue: u32, notifier: u32) -> Result<(), QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 5,
+            num = in(reg) 6,
             res = out(reg) res,
             in("r0") queue,
             in("r1") notifier,
@@ -316,7 +317,7 @@ pub fn wait_queues(queue_mask: u32) -> Result<u32, QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 6,
+            num = in(reg) 7,
             res = out(reg) res,
             inout("r0") queue_mask => queue,
         );
@@ -332,7 +333,7 @@ pub fn wait_queues_async(queue_mask: u32) -> Result<u32, QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 7,
+            num = in(reg) 8,
             res = out(reg) res,
             inout("r0") queue_mask => queue,
         );
@@ -349,7 +350,7 @@ pub fn wait_queues_irq(queue_mask: u32) -> Result<WakeSrc, QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 8,
+            num = in(reg) 9,
             res = out(reg) res,
             inout("r0") queue_mask => queue_irq,
             out("r1") src
@@ -367,7 +368,7 @@ pub fn wait_queues_irq_async(queue_mask: u32) -> Result<WakeSrc, QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 9,
+            num = in(reg) 10,
             res = out(reg) res,
             inout("r0") queue_mask => queue_irq,
             out("r1") src
@@ -395,7 +396,7 @@ pub fn read_header(queue: u32) -> Result<SyncHeader, QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 10,
+            num = in(reg) 11,
             res = out(reg) res,
             inout("r0") queue => pid,
             out("r1") pin_mask,
@@ -477,7 +478,7 @@ pub fn read_header_async(queue: u32) -> Result<AsyncHeader, QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 11,
+            num = in(reg) 12,
             res = out(reg) res,
             inout("r0") queue => pid,
             out("r1") pin_mask,
@@ -507,7 +508,7 @@ pub fn read_header_non_blocking(queue: u32) -> Result<SyncHeader, QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 12,
+            num = in(reg) 13,
             res = out(reg) res,
             inout("r0") queue => pid,
             out("r1") pin_mask,
@@ -540,7 +541,7 @@ pub fn read_header_async_non_blocking(queue: u32) -> Result<AsyncHeader, QueueEr
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 13,
+            num = in(reg) 14,
             res = out(reg) res,
             inout("r0") queue => pid,
             out("r1") pin_mask,
@@ -570,7 +571,7 @@ pub fn notify_read_header(queue: u32) -> Result<SyncHeader, QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 14,
+            num = in(reg) 15,
             res = out(reg) res,
             inout("r0") queue => pid,
             out("r1") pin_mask,
@@ -600,7 +601,7 @@ pub fn receive(queue: u32, buffer: &mut[u8]) -> Result<usize, QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 15,
+            num = in(reg) 16,
             res = out(reg) res,
             inout("r0") queue => read,
             in("r1") buffer.len(),
@@ -618,7 +619,7 @@ pub fn receive_async(queue: u32, buffer: &mut[u8]) -> Result<usize, QueueError> 
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 16,
+            num = in(reg) 17,
             res = out(reg) res,
             inout("r0") queue => read,
             in("r1") buffer.len(),
@@ -636,7 +637,7 @@ pub fn notify_receive(notifier: u32, buffer: &mut[u8]) -> Result<usize, QueueErr
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 17,
+            num = in(reg) 18,
             res = out(reg) res,
             inout("r0") notifier => read,
             in("r1") buffer.len(),
@@ -653,7 +654,7 @@ pub fn reply(queue: u32, reply: u32, buffer: &[u8]) -> Result<(), QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 18,
+            num = in(reg) 19,
             res = out(reg) res,
             in("r0") queue,
             in("r1") reply,
@@ -671,7 +672,7 @@ pub fn reply_empty(queue: u32, reply: u32) -> Result<(), QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 18,
+            num = in(reg) 19,
             res = out(reg) res,
             in("r0") queue,
             in("r1") reply,
@@ -688,7 +689,7 @@ pub fn notify_reply(notifier: u32, reply: u32, buffer: &[u8]) -> Result<(), Queu
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 19,
+            num = in(reg) 20,
             res = out(reg) res,
             in("r0") notifier,
             in("r1") reply,
@@ -706,7 +707,7 @@ pub fn notify_reply_empty(notifier: u32, reply: u32) -> Result<(), QueueError> {
             "mov r12, {num}",
             "svc 0",
             "mov {res}, r12",
-            num = in(reg) 19,
+            num = in(reg) 20,
             res = out(reg) res,
             in("r0") notifier,
             in("r1") reply,
@@ -714,6 +715,79 @@ pub fn notify_reply_empty(notifier: u32, reply: u32) -> Result<(), QueueError> {
         );
     }
     decode_queue_res(res)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum KPrintError {
+    UnknownSysCall,
+    InvalidAccess,
+    NotUTF8,
+    Unknown(u32)
+}
+
+impl TryFrom<u32> for KPrintError {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Err(()),
+            1 => Ok(Self::UnknownSysCall),
+            2 => Ok(Self::InvalidAccess),
+            3 => Ok(Self::NotUTF8),
+            _ => Ok(Self::Unknown(value))
+        }
+    }
+}
+
+fn decode_kprint_res(res: u32) -> Result<(), KPrintError> {
+    match KPrintError::try_from(res) {
+        Ok(err) => Err(err),
+        Err(()) => Ok(())
+    }
+}
+
+pub fn do_kprint(text: &str) -> Result<usize, KPrintError> {
+    let data = text.as_bytes();
+    let mut res: u32;
+    let mut len: u32;
+    unsafe {
+        asm!(
+            "mov r12, {num}",
+            "svc 0",
+            "mov {res}, r12",
+            num = in(reg) 21,
+            res = out(reg) res,
+            inout("r0") data.len() => len,
+            in("r1") data.as_ptr()
+        );
+    }
+    decode_kprint_res(res).map(|_| len as usize)
+}
+
+struct KPrint {}
+
+impl Write for KPrint {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        do_kprint(s).map(|_| ()).map_err(|_| fmt::Error)
+    }
+}
+
+#[macro_export]
+macro_rules! kprint {
+    ($($arg:tt)*) => ($crate::_kprint(format_args!($($arg)*)));
+}
+
+#[macro_export]
+macro_rules! kprintln {
+    () => ($crate::kprint!("\r\n"));
+    ($($arg:tt)*) => ($crate::kprint!("{}\r\n", format_args!($($arg)*)));
+}
+
+#[doc(hidden)]
+pub fn _kprint(args: fmt::Arguments) {
+    let mut print = KPrint {};
+    let res = print.write_fmt(args);
+    res.unwrap();
 }
 
 pub enum HeaderError {

@@ -4,7 +4,7 @@
 use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, ReadWrite, WriteOnly}};
-use small_os_lib::{QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, do_yield, read_header, receive, reply, reply_empty, send, send_empty, wait_irq};
+use small_os_lib::{QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, do_yield, read_header, receive, reply, reply_empty, send_empty, wait_irq};
 
 mod ctrl0_register {
     pub const DATA_SIZE_SHIFT: usize = 0;
@@ -161,89 +161,110 @@ impl SPI {
         }
     }
 
-    pub fn send_cmd(&mut self, cmd: u8, buffer: &mut [u8], tx_len: usize, rx_len: usize, padding: usize, delay: usize) {
-        assert!(tx_len < buffer.len());
-        assert!(rx_len < buffer.len());
+    pub fn send(&mut self, buffer: &mut [u8], tx_len: usize, rx_len: usize, padding: usize, delay: usize) -> Result<(), SPIReplyError> {
+        assert!(tx_len <= buffer.len());
+        assert!(rx_len <= buffer.len());
         self.wait_busy();
         field!(self.clear_reg, ctrl1).write(ctrl1_register::ENABLE_MASK);
-        field!(self.registers, data).write(cmd as u32);
-        let send_len = tx_len + 1 + padding;
-        let receive_len = delay + 1 + rx_len;
+        field!(self.registers, inter_clear).write(inter_register::RX_OVERRUN_MASK);
+        let send_len = tx_len + padding;
+        let receive_len = delay + rx_len;
         let len = send_len.max(receive_len);
-        let mut tx_index = 1;
+        let mut tx_index = 0;
         let mut rx_index = 0;
         while field!(self.registers, status).read() & status_register::TX_NOT_FULL_MASK != 0 && tx_index < len {
-            if tx_index < 1 + tx_len {
-                field!(self.registers, data).write(buffer[tx_index - 1] as u32);
+            if tx_index < tx_len {
+                field!(self.registers, data).write(buffer[tx_index] as u32);
             } else {
                 field!(self.registers, data).write(0);
             }
             tx_index += 1;
         }
         let mut tx_inter = 0;
-        if tx_index >= len {
+        if tx_index < len {
             tx_inter = inter_register::TX_FIFO_MASK;
         }
-        field!(self.registers, inter_mask_set_clear).write(inter_register::RX_FIFO_MASK | tx_inter);
+        field!(self.registers, inter_mask_set_clear).write(inter_register::RX_FIFO_MASK | inter_register::RX_OVERRUN_MASK | tx_inter);
         self.cs_low();
         field!(self.set_reg, ctrl1).write(ctrl1_register::ENABLE_MASK);
         while rx_index < len.saturating_sub(4) {
             wait_irq().unwrap();
-            if field!(self.registers, mask_inter).read() & inter_register::TX_FIFO_MASK != 0 {
-                if tx_index == len {
-                    field!(self.registers, inter_mask_set_clear).write(inter_register::RX_OVERRUN_MASK | inter_register::RX_TIMEOUT_MASK | inter_register::TX_FIFO_MASK);
-                } else {
-                    while field!(self.registers, status).read() & status_register::TX_NOT_FULL_MASK != 0 && tx_index < len {
-                        if tx_index < 1 + tx_len {
-                            field!(self.registers, data).write(buffer[tx_index - 1] as u32);
-                        } else {
-                            field!(self.registers, data).write(0);
-                        }
-                        tx_index += 1;
-                    }
-                }
+            let inter = field!(self.registers, mask_inter).read();
+            if inter & inter_register::RX_OVERRUN_MASK != 0 {
+                self.cs_high();
+                return Err(SPIReplyError::ReceieveOverrun);
             }
-            if field!(self.registers, mask_inter).read() & inter_register::RX_FIFO_MASK != 0 {
+            let mut tx_pop = 0;
+            if inter & inter_register::RX_FIFO_MASK != 0 {
                 while field!(self.registers, status).read() & status_register::RX_NOT_EMPTY_MASK != 0 {
-                    if rx_index > delay && rx_index - delay - 1 < rx_len {
-                        buffer[rx_index - delay - 1] = (field!(self.registers, data).read() & 0xff) as u8;
+                    if rx_index >= delay && rx_index - delay < rx_len {
+                        buffer[rx_index - delay] = (field!(self.registers, data).read() & 0xff) as u8;
                     } else {
                         _ = field!(self.registers, data).read();
                     }
                     rx_index += 1;
+                    tx_pop += 1;
+                }
+            }
+            if field!(self.registers, mask_inter).read() & inter_register::TX_FIFO_MASK != 0 {
+                if tx_index == len {
+                    field!(self.registers, inter_mask_set_clear).write(inter_register::RX_FIFO_MASK | inter_register::RX_OVERRUN_MASK);
+                } else {
+                    loop {
+                        let status = field!(self.registers, status).read();
+                        if tx_index < len && status & status_register::TX_NOT_FULL_MASK != 0 && status & status_register::RX_FULL_MASK == 0 && tx_pop > 0 {
+                            if tx_index < tx_len {
+                                field!(self.registers, data).write(buffer[tx_index] as u32);
+                            } else {
+                                field!(self.registers, data).write(0);
+                            }
+                            tx_index += 1;
+                            tx_pop -= 1;
+                        } else {
+                            break;
+                        }
+                    }
                 }
             }
         }
         while rx_index < len {
             let status = field!(self.registers, status).read();
             let mut prog = false;
+            let mut tx_pop = 0;
+            if field!(self.registers, status).read() & status_register::RX_NOT_EMPTY_MASK != 0{
+                if rx_index >= delay && rx_index - delay < rx_len {
+                    buffer[rx_index - delay] = (field!(self.registers, data).read() & 0xff) as u8;
+                } else {
+                    _ = field!(self.registers, data).read();
+                }
+                prog = true;
+                tx_pop += 1;
+                rx_index += 1;
+            }
             if tx_index < len {
-                if status & status_register::TX_NOT_FULL_MASK != 0 {
-                    if tx_index < 1 + tx_len {
+                if status & status_register::TX_NOT_FULL_MASK != 0 && tx_pop > 0 {
+                    if tx_index < tx_len {
                         field!(self.registers, data).write(buffer[tx_index] as u32);
                     } else {
                         field!(self.registers, data).write(0);
                     }
                     tx_index += 1;
-                    prog = true;
                 }
-            }
-            if field!(self.registers, status).read() & status_register::RX_NOT_EMPTY_MASK != 0{
-                if rx_index > delay && rx_index - delay - 1 < rx_len {
-                    buffer[rx_index - delay - 1] = (field!(self.registers, data).read() & 0xff) as u8;
-                } else {
-                    _ = field!(self.registers, data).read();
-                }
-                rx_index += 1;
             } else if !prog {
                 do_yield().unwrap();
             }
         }
         self.cs_high();
         // clear out extra data
-        while field!(self.registers, status).read() & status_register::RX_NOT_EMPTY_MASK != 0 {
-            _ = field!(self.registers, data);
+        loop {
+            let status = field!(self.registers, status).read();
+            if status & status_register::RX_NOT_EMPTY_MASK != 0 {
+                _ = field!(self.registers, data).read();
+            } else {
+                break;
+            }
         }
+        Ok(())
     }
 }
 
@@ -260,6 +281,7 @@ const DRIVE_LOW: u16 = 3;
 pub enum SPIReplyError {
     SendError,
     InvalidRequest,
+    ReceieveOverrun,
     InvalidSendBuffer,
     InvalidReplyBuffer
 }
@@ -269,8 +291,9 @@ impl From<SPIReplyError> for u32 {
         match value {
             SPIReplyError::SendError => 1,
             SPIReplyError::InvalidRequest => 2,
-            SPIReplyError::InvalidSendBuffer => 3,
-            SPIReplyError::InvalidReplyBuffer => 4
+            SPIReplyError::ReceieveOverrun => 3,
+            SPIReplyError::InvalidSendBuffer => 4,
+            SPIReplyError::InvalidReplyBuffer => 5
         }
     }
 }
@@ -293,12 +316,11 @@ impl From<QueueError> for SPIError {
 }
 
 pub struct Request {
-    cmd: u8,
     delay: usize,
     padding: usize,
     tx_len: usize,
     rx_len: usize,
-    buffer: [u8; 32],
+    buffer: [u8; 1024],
 }
 
 impl Request {
@@ -307,42 +329,38 @@ impl Request {
         match header.tag {
             0 => {
                 // synchronous
-                let mut req_buffer = [0; 33];
+                let mut req_buffer = [0; 1024];
                 if header.send_len as usize > req_buffer.len() {
                     return Err(SPIError::ReplyError(SPIReplyError::InvalidSendBuffer));
                 }
-                if header.reply_len as usize > req_buffer.len() - 1 {
+                if header.reply_len as usize > req_buffer.len() {
                     return Err(SPIError::ReplyError(SPIReplyError::InvalidReplyBuffer));
                 }
                 _ = receive(0, &mut req_buffer)?;
-                let mut buffer = [0; 32];
-                buffer[..header.send_len as usize - 1].copy_from_slice(&req_buffer[1..header.send_len as usize]);
                 Ok(Request { 
-                    cmd: req_buffer[0], 
-                    delay: (header.send_len - 1) as usize, 
+                    delay: header.send_len as usize, 
                     padding: 0, 
-                    tx_len: (header.send_len - 1) as usize, 
+                    tx_len: header.send_len as usize, 
                     rx_len: header.reply_len as usize, 
-                    buffer
+                    buffer: req_buffer
                 })
             },
             1 => {
                 // asynchronous
-                let mut req_buffer = [0; 41];
-                if header.send_len < 9 || header.send_len as usize > req_buffer.len() {
+                let mut req_buffer = [0; 1028];
+                if header.send_len < 8 || header.send_len as usize > req_buffer.len() {
                     return Err(SPIError::ReplyError(SPIReplyError::InvalidSendBuffer));
                 }
-                if header.reply_len as usize > req_buffer.len() - 9 {
+                if header.reply_len as usize > req_buffer.len() - 8 {
                     return Err(SPIError::ReplyError(SPIReplyError::InvalidReplyBuffer));
                 }
                 _ = receive(0, &mut req_buffer)?;
-                let mut buffer = [0; 32];
-                buffer[..header.send_len as usize - 9].copy_from_slice(&req_buffer[9..header.send_len as usize]);
+                let mut buffer = [0; 1024];
+                buffer[..header.send_len as usize - 8].copy_from_slice(&req_buffer[8..header.send_len as usize]);
                 Ok(Request {
-                    cmd: buffer[0],
-                    delay: u32::from_le_bytes(buffer[1..5].try_into().unwrap()) as usize,
-                    padding: u32::from_le_bytes(buffer[5..9].try_into().unwrap()) as usize,
-                    tx_len: (header.send_len - 9) as usize,
+                    delay: u32::from_le_bytes(req_buffer[0..4].try_into().unwrap()) as usize,
+                    padding: u32::from_le_bytes(req_buffer[4..8].try_into().unwrap()) as usize,
+                    tx_len: (header.send_len - 8) as usize,
                     rx_len: header.reply_len as usize,
                     buffer
                 })
@@ -366,8 +384,14 @@ pub extern "C" fn main(num_args: usize, spi_base: usize) {
     loop {
         match Request::parse() {
             Ok(mut request) => {
-                spi.send_cmd(request.cmd, &mut request.buffer, request.tx_len, request.rx_len, request.padding, request.delay);
-                check_critical(reply(0, 0, &request.buffer[..request.rx_len])).unwrap_or(Ok(())).unwrap();
+                match spi.send(&mut request.buffer, request.tx_len, request.rx_len, request.padding, request.delay) {
+                    Ok(()) => {
+                        check_critical(reply(0, 0, &request.buffer[..request.rx_len])).unwrap_or(Ok(())).unwrap();
+                    },
+                    Err(err) => {
+                        check_critical(reply_empty(0, u32::from(err))).unwrap_or(Ok(())).unwrap();
+                    }
+                }
             },
             Err(err) => {
                 match err {
