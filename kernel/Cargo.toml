@@ -4,6 +4,10 @@ name = "kernel"
 test = true # Enable testing
 version = "0.1.0"
 edition = "2024"
+authors = ["Fraser Griffin <f.griffin.22@abdn.ac.uk>"]
+description = "The SmallOS microkernel"
+repository = "https://github.com/F-gigabyte/small_os"
+license = "LGPL-3.0-or-later"
 
 [dependencies]
 rp2040-boot2 = "0.3.0"
@@ -17,3 +21,6 @@ cc = "1.2.53"
 [features]
 default = []
 error_codes = []
+benchmark = []
+random = []
+radiation = ["random", "benchmark"]

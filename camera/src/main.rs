@@ -1,9 +1,14 @@
+// use core intrinsics 
+#![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test::test_runner)]
+
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
-use core::arch::asm;
-
-use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, do_yield, kprintln, read_header, receive, reply, reply_empty, send, send_empty};
+use small_os_lib::{HeaderError, QueueError, args, check_critical, check_header_len, read_header, receive, reply, reply_empty, send, send_empty};
 
 /// Derived from the camera driver implementation at https://github.com/ArduCAM/PICO_SPI_CAM/blob/master/C/ArduCAM/ArduCAM.cpp, github.com/ArduCAM/PICO_SPI_CAM/blob/master/C/Examples/ArduCAM_Mini_2MP_Plus_4CAM_VideoStreaming/ArduCAM_Mini_2MP_Plus_4CAM_VideoStreaming.cpp,
 /// (github.com/ArduCAM/PICO_SPI_CAM/blob/master/C/Examples/ArduCAM_Mini_2MP_Plus_4CAM_VideoStreaming/ArduCAM_Mini_2MP_Plus_4CAM_VideoStreaming.cpp (accessed 25/03/2026)
@@ -1673,9 +1678,12 @@ impl Request {
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main(num_args: usize) {
-    assert!(num_args == 0);
+pub extern "C" fn main() {
+    let args = args();
+    assert_eq!(args.len(), 0);
     let mut cam = Camera::new();
+    #[cfg(test)]
+    test_main();
     loop {
         match Request::parse() {
             Ok(request) => {
@@ -1745,6 +1753,20 @@ pub extern "C" fn main(num_args: usize) {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Test framework which runs all the tests
+/// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+#[cfg(test)]
+mod test {
+    use small_os_lib::kprintln;
+
+    pub fn test_runner(tests: &[&dyn Fn()]) {
+        kprintln!("Running {} tests for camera", tests.len());
+        for test in tests {
+            test();
         }
     }
 }

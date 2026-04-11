@@ -6,13 +6,18 @@
 // r0 -> pointer to current Proc struct
 // This must be called within handler mode
 schedule:
-    // save r0 before calling functions
-    push {r0}
+#ifdef RADIATION
+    bl do_radiation
+#endif
+#ifdef ERROR_CODES
     bl correct_errors
+#endif
     bl switch_regions
+#ifdef BENCHMARK
+    bl kernel_exit
+#endif
     // start sys tick timer
     bl start_sys_tick
-    pop {r0}
     // set r1 to process stack pointer
     ldr r1, [r0, #0x20]
     // r4

@@ -31,7 +31,12 @@
 .globl _disable_irq
 .type _disable_irq, "function"
 
+// copies memory from one buffer (r0) to another (r2)
 // r0 -> load start, r1 -> load end, r2 -> virt start
+// Safety
+// r0 points to a readable buffer of byte length r1 - r0
+// r2 points to a writable buffer of byte length r1 - r0
+// Both buffers must be a multiple of 4 bytes in size and aligned at a 4 byte boundary
 _memset:
 2:
     cmp r0, r1
@@ -44,7 +49,11 @@ _memset:
 1:
     mov pc, lr
 
-// r0 -> start, r1 -> end
+// zeros out a buffer (r0)
+// r0 -> buffer start, r1 -> buffer end
+// Safety
+// r0 points to a writable buffer of byte length r1 - r0
+// The buffer must be a multiple of 4 bytes in size and aligned at a 4 byte boundary
 _zero:
     movs r2, #0
 2:
@@ -56,6 +65,8 @@ _zero:
 1:
     mov pc, lr
 
+// Address jumped to when the second stage bootloader finishes executing
+// This sets up the kernel's memory and jumps to main
 _start:
     // copy data into memory
     ldr r0, =__kernel_data_phys_start // Data physical address
@@ -65,10 +76,6 @@ _start:
     ldr r0, =__async_queues_phys_start // Data physical address
     ldr r1, =__async_queues_phys_end // Data physical address
     ldr r2, =__async_queues_virt_start // Data load address
-    bl _memset
-    ldr r0, =__kernel_text_flash_phys_start // Data physical address
-    ldr r1, =__kernel_text_flash_phys_end // Data physical address
-    ldr r2, =__kernel_text_flash_virt_start // Data load address
     bl _memset
     // 0 bss section
     ldr r0, =__kernel_bss_virt_start // bss load address
@@ -92,16 +99,22 @@ _start:
     wfi
     b .
 
+// Non-maskable interrupt handler
 _nmi:
     // save lr
     push {lr}
     // pause sys tick
     bl pause_sys_tick
+#ifdef BENCHMARK
+    bl kernel_entry
+#endif
     pop {r1}
     mov r0, sp
+    // jump to main handler
     bl nmi
 // if return, because was a process that was terminated
 2:
+    // check if returned process is null
     movs r0, r0
     bne 3f
     // make thread mode privileged
@@ -110,47 +123,73 @@ _nmi:
     bics r0, r2
     msr control, r0
     isb
+#ifdef RADIATION
+    bl do_radiation
+#endif
+#ifdef BENCHMARK
+    bl kernel_exit
+#endif
     // return to thread mode using main stack (idle)
     ldr r0, =0xfffffff9
     bx r0
 3:
+    // schedule returned process
     bl schedule
 
+// hard fault handler
 _hard_fault:
     // save lr
     push {lr}
     // pause sys tick
     bl pause_sys_tick
+#ifdef BENCHMARK
+    bl kernel_entry
+#endif
     pop {r1}
     mov r0, sp
+    // jump to main handler
     bl hard_fault
 // if return, because was a process that was terminated
 2:
+    // check if returned process is null
     movs r0, r0
     bne 3f
+    // process is null
     // make thread mode privileged
     mrs r0, control
     movs r2, #1
     bics r0, r2
     msr control, r0
     isb
+#ifdef RADIATION
+    bl do_radiation
+#endif
+#ifdef BENCHMARK
+    bl kernel_exit
+#endif
     // return to thread mode using main stack (idle)
     ldr r0, =0xfffffff9
     bx r0
 3:
+    // schedule returned process
     bl schedule
 
 
 _sys_call:
     // pause sys tick
     bl pause_sys_tick
+#ifdef BENCHMARK
+    bl kernel_entry
+#endif
     // get current process
     bl get_current_proc
     // check if currently running a process and if so, save the state
     movs r0, r0
     beq 3f // if not running a process, the sys call is invalid
+#ifdef ERROR_CODES
     // save current process codes
     bl update_codes
+#endif
     // store unsaved process registers (r4 to r11)
     stm r0!, {r4-r7}
     mov r4, r8
@@ -163,39 +202,58 @@ _sys_call:
     str r1, [r0]
     // first argument stack
     mov r0, r1
+    // jump to main handler
     bl sys_call
     // if got null pointer (no process) wait for an interrupt and try again
 2:
+    // check if returned process is null
     movs r0, r0
     bne 4f
 3:
+    // process is null
     // make thread mode privileged
     mrs r0, control
     movs r2, #1
     bics r0, r2
     msr control, r0
     isb
+#ifdef RADIATION
+    bl do_radiation
+#endif
+#ifdef BENCHMARK
+    bl kernel_exit
+#endif
     // return to thread mode using main stack (idle)
     ldr r0, =0xfffffff9
     bx r0
 4:
+    // schedule returned process
     bl schedule
 
+// Idle process
+// Waits for an interrupt to happen in a loop
 idle:
 1:
     wfi
     b 1b
 
+// Sys Pend interrupt generated
+// This is the interrupt caused by the kernel when scheduling starts
 _sys_pend:
     // pause system tick
     bl pause_sys_tick
+#ifdef BENCHMARK
+    bl kernel_entry
+#endif
     // get current process
     bl get_current_proc
     // check if currently running a process and if so, save the state
     movs r0, r0
     beq 1f
+#ifdef ERROR_CODES
     // save current process codes
     bl update_codes
+#endif
     // store unsaved process registers (r4 to r11)
     stm r0!, {r4-r7}
     mov r4, r8
@@ -208,33 +266,46 @@ _sys_pend:
     str r1, [r0]
 1:
     bl pend_sv
-    // if got null pointer (no process) wait for an interrupt and try again
+    // check if returned process is null
     movs r0, r0
     bne 3f
 2:
+    // process is null
     // make thread mode privileged
     mrs r0, control
     movs r2, #1
     bics r0, r2
     msr control, r0
     isb
+#ifdef RADIATION
+    bl do_radiation
+#endif
+#ifdef BENCHMARK
+    bl kernel_exit
+#endif
     // return to thread mode using main stack (idle)
     ldr r0, =0xfffffff9
     bx r0
 3:
+    // schedule returned process
     bl schedule
 
 _irq:
     // pause sys tick
     bl pause_sys_tick
+#ifdef BENCHMARK
+    bl kernel_entry
+#endif
     // get current process
     bl get_current_proc
     // check if currently running a process and if so, save the state
     movs r0, r0
     beq 2f // if not running a process, don't need to save
+#ifdef ERROR_CODES
     // save current process codes
     bl update_codes
     // store unsaved process registers (r4 to r11)
+#endif
     stm r0!, {r4-r7}
     mov r4, r8
     mov r5, r9
@@ -250,58 +321,79 @@ _irq:
     movs r1, #0x3f
     ands r0, r1
     subs r0, #16
+    // jump to main handler
     bl irq_handler
-    // if got null pointer (no process) wait for an interrupt and try again
+    // check if returned process is null
     movs r0, r0
     bne 4f
 3:
+    // process is null
     // make thread mode privileged
     mrs r0, control
     movs r2, #1
     bics r0, r2
     msr control, r0
     isb
+#ifdef RADIATION
+    bl do_radiation
+#endif
+#ifdef BENCHMARK
+    bl kernel_exit
+#endif
     // return to thread mode using main stack (idle)
     ldr r0, =0xfffffff9
     bx r0
 4:
+    // schedule returned process
     bl schedule
 
 _proc_switch:
     // pause system tick
     bl pause_sys_tick
+#ifdef BENCHMARK
+    bl kernel_entry
+#endif
     // get current process
     bl get_current_proc
     // check if currently running a process and if so, save the state
     movs r0, r0
     beq 1f
+#ifdef ERROR_CODES
     // save current process codes
     bl update_codes
-    mov r2, r0
+#endif
     // store unsaved process registers (r4 to r11)
-    stm r2!, {r4-r7}
+    stm r0!, {r4-r7}
     mov r4, r8
     mov r5, r9
     mov r6, r10
     mov r7, r11
-    stm r2!, {r4-r7}
+    stm r0!, {r4-r7}
     mrs r1, psp
     // save stack pointer
-    str r1, [r2]
+    str r1, [r0]
 1:
     bl sys_tick
-    // if got null pointer (no process) wait for an interrupt and try again
+    // check if returned process is null
     movs r0, r0
     bne 3f
 2:
+    // process is null
     // make thread mode privileged
     mrs r0, control
     movs r2, #1
     bics r0, r2
     msr control, r0
     isb
+#ifdef RADIATION
+    bl do_radiation
+#endif
+#ifdef BENCHMARK
+    bl kernel_exit
+#endif
     // return to thread mode using main stack (idle)
     ldr r0, =0xfffffff9
     bx r0
 3:
+    // schedule returned process
     bl schedule

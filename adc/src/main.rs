@@ -1,10 +1,17 @@
+// use core intrinsics 
+#![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test::test_runner)]
+
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
 use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadOnly, ReadPure, ReadPureWrite, ReadWrite}};
-use small_os_lib::{HeaderError, QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, check_header_len, do_yield, read_header, receive, reply, reply_empty, send_empty, wait_irq};
+use small_os_lib::{HeaderError, QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, args, check_critical, check_header_len, do_yield, read_header, receive, reply, reply_empty, send_empty, wait_irq};
 
 #[repr(C)]
 struct ADCRegisters {
@@ -39,12 +46,24 @@ mod cs_register {
     pub const ERROR_STICKY_MASK: u32 = 1 << ERROR_STICKY_SHIFT;
     pub const ANALOG_MUX_MASK: u32 = 0x7 << ANALOG_MUX_SHIFT;
     pub const ROUND_ROBIN_MASK: u32 = 0x1f << ROUND_ROBIN_SHIFT;
+
+    pub const VALID_MASK: u32 = ENABLE_MASK |
+        TEMP_ENABLE_MASK |
+        START_ONCE_MASK |
+        START_MANY_MASK |
+        READY_MASK |
+        ERROR_MASK |
+        ERROR_STICKY_MASK |
+        ANALOG_MUX_MASK |
+        ROUND_ROBIN_MASK;
 }
 
 mod result_register {
     pub const RESULT_SHIFT: usize = 0;
 
     pub const RESULT_MASK: u32 = 0xfff << RESULT_SHIFT;
+
+    pub const VALID_MASK: u32 = RESULT_MASK;
 }
 
 mod fifo_ctrl_status_register {
@@ -69,6 +88,17 @@ mod fifo_ctrl_status_register {
     pub const OVERFLOW_MASK: u32 = 1 << OVERFLOW_SHIFT;
     pub const LEVEL_MASK: u32 = 0xf << LEVEL_SHIFT;
     pub const THRESHOLD_MASK: u32 = 0xf << THRESHOLD_SHIFT;
+
+    pub const VALID_MASK: u32 = ENABLE_MASK |
+        SHIFT_MASK |
+        ERROR_MASK |
+        DMA_MASK |
+        EMPTY_MASK |
+        FULL_MASK |
+        UNDERFLOW_MASK |
+        OVERFLOW_MASK |
+        LEVEL_MASK |
+        THRESHOLD_MASK;
 }
 
 mod fifo_register {
@@ -77,6 +107,9 @@ mod fifo_register {
 
     pub const VALUE_MASK: u32 = 0xfff << VALUE_SHIFT;
     pub const ERROR_MASK: u32 = 1 << ERROR_SHIFT;
+
+    pub const VALID_MASK: u32 = VALUE_MASK |
+        ERROR_MASK;
 }
 
 mod div_register {
@@ -85,17 +118,21 @@ mod div_register {
 
     pub const FRAC_MASK: u32 = 0xff << FRAC_SHIFT;
     pub const INT_MASK: u32 = 0xffff << INT_SHIFT;
+
+    pub const VALID_MASK: u32 = FRAC_MASK |
+        INT_MASK;
 }
 
 mod inter_register {
     pub const FIFO_SHIFT: usize = 0;
     
     pub const FIFO_MASK: u32 = 1 << FIFO_SHIFT;
+
+    pub const VALID_MASK: u32 = FIFO_MASK;
 }
 
 pub struct ADC {
     registers: UniqueMmioPointer<'static, ADCRegisters>,
-    set_reg: UniqueMmioPointer<'static, ADCRegisters>,
     clear_reg: UniqueMmioPointer<'static, ADCRegisters>,
     bitmap: u32
 }
@@ -108,17 +145,20 @@ impl ADC {
         let mut res = unsafe {
             Self { 
                 registers: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(adc_base)).unwrap()),
-                set_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(adc_base + REG_ALIAS_SET_BITS)).unwrap()),
                 clear_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(adc_base + REG_ALIAS_CLR_BITS)).unwrap()),
                 bitmap
             }
         };
-        field!(res.registers, cs).write(
+        field!(res.registers, cs).modify(|cs|
+            (cs & !cs_register::VALID_MASK) |
             cs_register::ENABLE_MASK | 
             cs_register::TEMP_ENABLE_MASK
         );
-        field!(res.registers, div).write(0);
-        field!(res.registers, inter_enable).write(inter_register::FIFO_MASK);
+        field!(res.registers, div).modify(|div| div & !div_register::VALID_MASK);
+        field!(res.registers, inter_enable).modify(|inter_enable| 
+            (inter_enable & !inter_register::VALID_MASK) |
+            inter_register::FIFO_MASK
+        );
         while field!(res.registers, cs).read() & cs_register::READY_MASK == 0 {
             do_yield().unwrap();
         }
@@ -148,14 +188,16 @@ impl ADC {
         let mut len = buffer.len() / 2;
         let mut buffer_offset = 0;
         while len > FIFO_SIZE {
-            field!(self.registers, fifo_ctrl_status).write(
+            field!(self.registers, fifo_ctrl_status).modify(|fifo_ctrl_status|
+                (fifo_ctrl_status & !fifo_ctrl_status_register::VALID_MASK) |
                 fifo_ctrl_status_register::ENABLE_MASK | 
                 fifo_ctrl_status_register::ERROR_MASK | 
                 fifo_ctrl_status_register::UNDERFLOW_MASK | 
                 fifo_ctrl_status_register::OVERFLOW_MASK |
                 ((FIFO_SIZE as u32) << fifo_ctrl_status_register::THRESHOLD_SHIFT)
             );
-            field!(self.registers, cs).write(
+            field!(self.registers, cs).modify(|cs|
+                (cs & !cs_register::VALID_MASK) |
                 cs_register::ENABLE_MASK |
                 cs_register::TEMP_ENABLE_MASK |
                 cs_register::START_MANY_MASK |
@@ -176,14 +218,16 @@ impl ADC {
             }
             len -= FIFO_SIZE;
         }
-        field!(self.registers, fifo_ctrl_status).write(
+        field!(self.registers, fifo_ctrl_status).modify(|fifo_ctrl_status|
+            (fifo_ctrl_status & !fifo_ctrl_status_register::VALID_MASK) |
             fifo_ctrl_status_register::ENABLE_MASK | 
             fifo_ctrl_status_register::ERROR_MASK | 
             fifo_ctrl_status_register::UNDERFLOW_MASK | 
             fifo_ctrl_status_register::OVERFLOW_MASK |
             ((len as u32) << fifo_ctrl_status_register::THRESHOLD_SHIFT)
         );
-        field!(self.registers, cs).write(
+        field!(self.registers, cs).modify(|cs|
+            (cs & !cs_register::VALID_MASK) |
             cs_register::ENABLE_MASK |
             cs_register::TEMP_ENABLE_MASK |
             cs_register::START_MANY_MASK |
@@ -222,14 +266,16 @@ impl ADC {
         let mut len = buffer.len() / 2;
         let mut buffer_offset = 0;
         while len > FIFO_SIZE {
-            field!(self.registers, fifo_ctrl_status).write(
+            field!(self.registers, fifo_ctrl_status).modify(|fifo_ctrl_status|
+                (fifo_ctrl_status & !fifo_ctrl_status_register::VALID_MASK) |
                 fifo_ctrl_status_register::ENABLE_MASK | 
                 fifo_ctrl_status_register::ERROR_MASK | 
                 fifo_ctrl_status_register::UNDERFLOW_MASK | 
                 fifo_ctrl_status_register::OVERFLOW_MASK |
                 ((FIFO_SIZE as u32) << fifo_ctrl_status_register::THRESHOLD_SHIFT)
             );
-            field!(self.registers, cs).write(
+            field!(self.registers, cs).modify(|cs|
+                (cs & !cs_register::VALID_MASK) |
                 cs_register::ENABLE_MASK |
                 cs_register::TEMP_ENABLE_MASK |
                 cs_register::START_MANY_MASK |
@@ -252,14 +298,16 @@ impl ADC {
             start = (start + FIFO_SIZE) % (samples.len());
             len -= FIFO_SIZE;
         }
-        field!(self.registers, fifo_ctrl_status).write(
+        field!(self.registers, fifo_ctrl_status).modify(|fifo_ctrl_status|
+            (fifo_ctrl_status & !fifo_ctrl_status_register::VALID_MASK) |
             fifo_ctrl_status_register::ENABLE_MASK | 
             fifo_ctrl_status_register::ERROR_MASK | 
             fifo_ctrl_status_register::UNDERFLOW_MASK | 
             fifo_ctrl_status_register::OVERFLOW_MASK |
             ((len as u32) << fifo_ctrl_status_register::THRESHOLD_SHIFT)
         );
-        field!(self.registers, cs).write(
+        field!(self.registers, cs).modify(|cs|
+            (cs & !cs_register::VALID_MASK) |
             cs_register::ENABLE_MASK |
             cs_register::TEMP_ENABLE_MASK |
             cs_register::START_MANY_MASK |
@@ -284,14 +332,16 @@ impl ADC {
     pub fn read_sample(&mut self, src: u8) -> u16 {
         assert!(src <= MAX_SOURCE);
         self.wait_busy();
-        field!(self.registers, fifo_ctrl_status).write(
+        field!(self.registers, fifo_ctrl_status).modify(|fifo_ctrl_status|
+            (fifo_ctrl_status & !fifo_ctrl_status_register::VALID_MASK) |
             fifo_ctrl_status_register::ENABLE_MASK | 
             fifo_ctrl_status_register::ERROR_MASK | 
             fifo_ctrl_status_register::UNDERFLOW_MASK | 
             fifo_ctrl_status_register::OVERFLOW_MASK |
             ((1 as u32) << fifo_ctrl_status_register::THRESHOLD_SHIFT)
         );
-        field!(self.registers, cs).write(
+        field!(self.registers, cs).modify(|cs|
+            (cs & !cs_register::VALID_MASK) |
             cs_register::ENABLE_MASK |
             cs_register::TEMP_ENABLE_MASK |
             cs_register::START_ONCE_MASK |
@@ -477,10 +527,17 @@ impl Request {
 const IO_BANK0_QUEUE: u32 = 0;
 
 #[unsafe(no_mangle)]
-pub extern "C" fn main(num_args: usize, adc_base: usize, bitmap: u32) {
-    assert!(num_args == 2);
+pub extern "C" fn main() {
+    let args = args();
+    assert_eq!(args.len(), 2);
     // check func sel has been set up
     send_empty(IO_BANK0_QUEUE, 0, &[]).unwrap();
+    #[cfg(test)]
+    {
+        test_main();
+    }
+    let adc_base = args[0] as usize;
+    let bitmap = args[1];
     let mut adc = unsafe {
         ADC::new(adc_base, bitmap)
     };
@@ -533,5 +590,64 @@ pub extern "C" fn main(num_args: usize, adc_base: usize, bitmap: u32) {
                 }
             }
         }
+    }
+}
+
+/// Test framework which runs all the tests
+/// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+#[cfg(test)]
+mod test {
+
+    use small_os_lib::{kprint, kprintln};
+
+    use super::*;
+
+    pub fn test_runner(tests: &[&dyn Fn()]) {
+        kprintln!("Running {} tests for ADC", tests.len());
+        for test in tests {
+            test();
+        }
+    }
+
+    #[test_case]
+    fn test_setup() {
+        let args = args();
+        let adc_base = args[0] as usize;
+        let bitmap = args[1];
+        let mut adc = unsafe {
+            ADC::new(adc_base, bitmap)
+        };
+        kprintln!("Testing ADC setup");
+        kprint!("Testing cs register ");
+        let cs = field!(adc.registers, cs).read();
+        assert_eq!(cs & cs_register::VALID_MASK, 0x103);
+        kprintln!("[ok]");
+        kprint!("Testing div register ");
+        let div = field!(adc.registers, div).read();
+        assert_eq!(div & div_register::VALID_MASK, 0);
+        kprintln!("[ok]");
+    }
+
+    #[test_case]
+    fn test_valid() {
+        kprintln!("Testing ADC register mask values");
+        kprint!("Testing cs register ");
+        assert_eq!(cs_register::VALID_MASK, 0x1f770f);
+        kprintln!("[ok]");
+        kprint!("Testing result register ");
+        assert_eq!(result_register::VALID_MASK, 0xfff);
+        kprintln!("[ok]");
+        kprint!("Testing fifo ctrl status register ");
+        assert_eq!(fifo_ctrl_status_register::VALID_MASK, 0xf0f0f0f);
+        kprintln!("[ok]");
+        kprint!("Testing fifo register ");
+        assert_eq!(fifo_register::VALID_MASK, 0x8fff);
+        kprintln!("[ok]");
+        kprint!("Testing div register ");
+        assert_eq!(div_register::VALID_MASK, 0xffffff);
+        kprintln!("[ok]");
+        kprint!("Testing interrupt register ");
+        assert_eq!(inter_register::VALID_MASK, 0x1);
+        kprintln!("[ok]");
     }
 }

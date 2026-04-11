@@ -1,14 +1,14 @@
 async_message_len = 128
+debug_path = "target/thumbv6m-none-eabi/debug"
+release_path = "target/thumbv6m-none-eabi/release"
 
 [kernel]
-debug_src = "target/thumbv6m-none-eabi/debug/kernel"
-release_src = "target/thumbv6m-none-eabi/release/kernel"
+exec = "kernel"
 
 [[programs]]
-name = "test_driver"
+name = "example_program"
+exec = "example_program"
 priority = 3
-debug_src = "target/thumbv6m-none-eabi/debug/test_driver"
-release_src = "target/thumbv6m-none-eabi/release/test_driver"
 num_sync_queues = 0
 async_queues = []
 sync_endpoints = [{ name = "uart", queue = 0 }, { name = "adc", queue = 0 }, { name = "camera", queue = 0 }, { name = "kermit", queue = 0 }]
@@ -18,11 +18,10 @@ block_len = 247
 
 [[programs]]
 name = "uart"
+exec = "uart"
 priority = 3
 driver = "UART0"
 pins = [0, 1, 2, 3]
-debug_src = "target/thumbv6m-none-eabi/debug/uart"
-release_src = "target/thumbv6m-none-eabi/release/uart"
 num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "io_bank0", queue = 0 }]
@@ -32,10 +31,9 @@ block_len = 247
 
 [[programs]]
 name = "reset"
+exec = "reset"
 priority = 3
 driver = "Subsystem Reset"
-debug_src = "target/thumbv6m-none-eabi/debug/reset"
-release_src = "target/thumbv6m-none-eabi/release/reset"
 num_sync_queues = 1
 async_queues = []
 sync_endpoints = []
@@ -45,10 +43,9 @@ block_len = 247
 
 [[programs]]
 name = "io_bank0"
+exec = "io_bank0"
 priority = 3
 driver = "IO Bank0"
-debug_src = "target/thumbv6m-none-eabi/debug/io_bank0"
-release_src = "target/thumbv6m-none-eabi/release/io_bank0"
 num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "reset", queue = 0 }, { name = "pads_bank0", queue = 0 }]
@@ -58,10 +55,9 @@ block_len = 247
 
 [[programs]]
 name = "pads_bank0"
+exec = "pads_bank0"
 priority = 3
 driver = "IO Bank0 Pads"
-debug_src = "target/thumbv6m-none-eabi/debug/pads_bank0"
-release_src = "target/thumbv6m-none-eabi/release/pads_bank0"
 num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "reset", queue = 0 }]
@@ -71,11 +67,10 @@ block_len = 247
 
 [[programs]]
 name = "adc"
+exec = "adc"
 priority = 3
 driver = "ADC"
 pins = [28]
-debug_src = "target/thumbv6m-none-eabi/debug/adc"
-release_src = "target/thumbv6m-none-eabi/release/adc"
 num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "io_bank0", queue = 0 }]
@@ -85,11 +80,10 @@ block_len = 247
 
 #[[programs]]
 #name = "sio"
+#exec = "sio"
 #priority = 3
 #driver = "SIO Proc 0"
 #pins = [16, 17, 18, 19]
-#debug_src = "target/thumbv6m-none-eabi/debug/sio"
-#release_src = "target/thumbv6m-none-eabi/release/sio"
 #num_sync_queues = 1
 #async_queues = []
 #sync_endpoints = [{ name = "io_bank0", queue = 0 }]
@@ -99,11 +93,10 @@ block_len = 247
 
 [[programs]]
 name = "spi"
+exec = "spi"
 priority = 3
 driver = "SPI0"
 pins = [16, 17, 18, 19]
-debug_src = "target/thumbv6m-none-eabi/debug/spi"
-release_src = "target/thumbv6m-none-eabi/release/spi"
 num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "io_bank0", queue = 0 }]
@@ -113,9 +106,8 @@ block_len = 247
 
 [[programs]]
 name = "camera"
+exec = "camera"
 priority = 3
-debug_src = "target/thumbv6m-none-eabi/debug/camera"
-release_src = "target/thumbv6m-none-eabi/release/camera"
 num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "spi", queue = 0 }, { name = "i2c", queue = 0 }, { name = "timer", queue = 0 }]
@@ -125,11 +117,10 @@ block_len = 247
 
 [[programs]]
 name = "i2c"
+exec = "i2c"
 priority = 3
 driver = "I2C0"
 pins = [20, 21]
-debug_src = "target/thumbv6m-none-eabi/debug/i2c"
-release_src = "target/thumbv6m-none-eabi/release/i2c"
 num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "io_bank0", queue = 0 }]
@@ -139,10 +130,9 @@ block_len = 247
 
 [[programs]]
 name = "timer"
+exec = "timer"
 priority = 3
 driver = "Timer"
-debug_src = "target/thumbv6m-none-eabi/debug/timer"
-release_src = "target/thumbv6m-none-eabi/release/timer"
 num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "reset", queue = 0 }]
@@ -152,9 +142,8 @@ block_len = 247
 
 [[programs]]
 name = "kermit"
+exec = "kermit"
 priority = 3
-debug_src = "target/thumbv6m-none-eabi/debug/kermit"
-release_src = "target/thumbv6m-none-eabi/release/kermit"
 num_sync_queues = 1
 async_queues = []
 sync_endpoints = [{ name = "uart", queue = 0 }]

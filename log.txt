@@ -1,0 +1,1586 @@
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/sio/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/uart/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/i2c/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/camera/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/small_os_lib/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/adc/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/kermit/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/reset/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/io_bank0/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/pads_bank0/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/kernel/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/timer/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/spi/Cargo.toml: unused manifest key: package.test
+warning: /home/han/Documents/CompSciAberdeen/SmallOS/small_os/example_program/Cargo.toml: unused manifest key: package.test
+warning: unused import: `process::Command`
+ --> kernel/build.rs:1:27
+  |
+1 | use std::{fs, path::Path, process::Command};
+  |                           ^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `cc::Build`
+ --> kernel/build.rs:3:5
+  |
+3 | use cc::Build;
+  |     ^^^^^^^^^
+
+warning: `kernel` (build script) generated 2 warnings
+   Compiling small_os_lib v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/small_os_lib)
+   Compiling reset v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/reset)
+   Compiling io_bank0 v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/io_bank0)
+   Compiling timer v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/timer)
+   Compiling test_b v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/test_b)
+   Compiling camera v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/camera)
+   Compiling adc v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/adc)
+   Compiling pads_bank0 v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/pads_bank0)
+   Compiling example_program v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/example_program)
+   Compiling tester v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/tester)
+   Compiling test_a v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/test_a)
+   Compiling spi v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/spi)
+   Compiling uart v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/uart)
+   Compiling kernel v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/kernel)
+   Compiling i2c v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/i2c)
+   Compiling sio v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/sio)
+   Compiling kermit v0.1.0 (/home/han/Documents/CompSciAberdeen/SmallOS/small_os/kermit)
+warning: the feature `core_intrinsics` is internal to the compiler or standard library
+ --> small_os_lib/src/lib.rs:2:12
+  |
+2 | #![feature(core_intrinsics)]
+  |            ^^^^^^^^^^^^^^^
+  |
+  = note: using it is strongly discouraged
+  = note: `#[warn(internal_features)]` on by default
+
+warning: `small_os_lib` (lib) generated 1 warning
+warning: the feature `core_intrinsics` is internal to the compiler or standard library
+ --> sio/src/main.rs:2:12
+  |
+2 | #![feature(core_intrinsics)]
+  |            ^^^^^^^^^^^^^^^
+  |
+  = note: using it is strongly discouraged
+  = note: `#[warn(internal_features)]` on by default
+
+warning: the feature `core_intrinsics` is internal to the compiler or standard library
+ --> tester/src/main.rs:2:12
+  |
+2 | #![feature(core_intrinsics)]
+  |            ^^^^^^^^^^^^^^^
+  |
+  = note: using it is strongly discouraged
+  = note: `#[warn(internal_features)]` on by default
+
+warning: unused import: `kprintln`
+  --> tester/src/main.rs:13:107
+   |
+13 | ...s, clear_irq, do_kprint, do_yield, kprintln, notify_read_header, notify_receive...
+   |                                       ^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: the feature `core_intrinsics` is internal to the compiler or standard library
+ --> uart/src/main.rs:2:12
+  |
+2 | #![feature(core_intrinsics)]
+  |            ^^^^^^^^^^^^^^^
+  |
+  = note: using it is strongly discouraged
+  = note: `#[warn(internal_features)]` on by default
+
+warning: unused imports: `clear_irq`, `kprintln`, and `send`
+  --> uart/src/main.rs:14:125
+   |
+14 | ...n, clear_irq, do_yield, kprintln, read_header, receive, reply, reply_empty, send, s...
+   |       ^^^^^^^^^            ^^^^^^^^                                            ^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0433]: cannot find type `NonNull` in this scope
+   --> kernel/src/clocks.rs:372:51
+    |
+372 | ...ueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base)).unwrap...
+    |                       ^^^^^^^ use of undeclared type `NonNull`
+    |
+help: consider importing this struct
+    |
+  3 + use core::ptr::NonNull;
+    |
+
+error[E0433]: cannot find module or crate `ptr` in this scope
+   --> kernel/src/clocks.rs:372:64
+    |
+372 | ...NonNull::new(ptr::with_exposed_provenance_mut(base)).unwrap()),
+    |                 ^^^ use of unresolved module or unlinked crate `ptr`
+    |
+    = help: if you wanted to use a crate named `ptr`, use `cargo add ptr` to add it to your `Cargo.toml`
+help: a builtin type with a similar name exists
+    |
+372 -                 registers: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base)).unwrap()),
+372 +                 registers: UniqueMmioPointer::new(NonNull::new(str::with_exposed_provenance_mut(base)).unwrap()),
+    |
+help: consider importing this module
+    |
+  3 + use core::ptr;
+    |
+
+error[E0433]: cannot find type `NonNull` in this scope
+   --> kernel/src/clocks.rs:373:49
+    |
+373 | ...   set_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_m...
+    |                                       ^^^^^^^ use of undeclared type `NonNull`
+    |
+help: consider importing this struct
+    |
+  3 + use core::ptr::NonNull;
+    |
+
+error[E0433]: cannot find module or crate `ptr` in this scope
+   --> kernel/src/clocks.rs:373:62
+    |
+373 | ...NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_SET_BITS)).unwr...
+    |                 ^^^ use of unresolved module or unlinked crate `ptr`
+    |
+    = help: if you wanted to use a crate named `ptr`, use `cargo add ptr` to add it to your `Cargo.toml`
+help: a builtin type with a similar name exists
+    |
+373 -                 set_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_SET_BITS)).unwrap()),
+373 +                 set_reg: UniqueMmioPointer::new(NonNull::new(str::with_exposed_provenance_mut(base + REG_ALIAS_SET_BITS)).unwrap()),
+    |
+help: consider importing this module
+    |
+  3 + use core::ptr;
+    |
+
+error[E0433]: cannot find type `NonNull` in this scope
+   --> kernel/src/clocks.rs:374:51
+    |
+374 | ...ueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_AL...
+    |                       ^^^^^^^ use of undeclared type `NonNull`
+    |
+help: consider importing this struct
+    |
+  3 + use core::ptr::NonNull;
+    |
+
+error[E0433]: cannot find module or crate `ptr` in this scope
+   --> kernel/src/clocks.rs:374:64
+    |
+374 | ...NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_CLR_BITS)).unwr...
+    |                 ^^^ use of unresolved module or unlinked crate `ptr`
+    |
+    = help: if you wanted to use a crate named `ptr`, use `cargo add ptr` to add it to your `Cargo.toml`
+help: a builtin type with a similar name exists
+    |
+374 -                 clear_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_CLR_BITS)).unwrap())
+374 +                 clear_reg: UniqueMmioPointer::new(NonNull::new(str::with_exposed_provenance_mut(base + REG_ALIAS_CLR_BITS)).unwrap())
+    |
+help: consider importing this module
+    |
+  3 + use core::ptr;
+    |
+
+warning: the feature `core_intrinsics` is internal to the compiler or standard library
+ --> i2c/src/main.rs:2:12
+  |
+2 | #![feature(core_intrinsics)]
+  |            ^^^^^^^^^^^^^^^
+  |
+  = note: using it is strongly discouraged
+  = note: `#[warn(internal_features)]` on by default
+
+warning: the feature `core_intrinsics` is internal to the compiler or standard library
+ --> camera/src/main.rs:2:12
+  |
+2 | #![feature(core_intrinsics)]
+  |            ^^^^^^^^^^^^^^^
+  |
+  = note: using it is strongly discouraged
+  = note: `#[warn(internal_features)]` on by default
+
+warning: the feature `core_intrinsics` is internal to the compiler or standard library
+ --> kernel/src/main.rs:2:12
+  |
+2 | #![feature(core_intrinsics)]
+  |            ^^^^^^^^^^^^^^^
+  |
+  = note: using it is strongly discouraged
+  = note: `#[warn(internal_features)]` on by default
+
+warning: the feature `core_intrinsics` is internal to the compiler or standard library
+ --> pads_bank0/src/main.rs:2:12
+  |
+2 | #![feature(core_intrinsics)]
+  |            ^^^^^^^^^^^^^^^
+  |
+  = note: using it is strongly discouraged
+  = note: `#[warn(internal_features)]` on by default
+
+warning: unused imports: `SpinIRQGuard` and `irqs`
+  --> kernel/src/main.rs:18:104
+   |
+18 | ...PU, mutex::{SpinIRQGuard, force_spinlock_unlock}, nvic::{NVIC, irqs}, pll::{PLL...
+   |                ^^^^^^^^^^^^                                       ^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `arch::asm`
+ --> kernel/src/xosc.rs:1:12
+  |
+1 | use core::{arch::asm, ptr::{self, NonNull}};
+  |            ^^^^^^^^^
+
+warning: unused import: `QUANTUM_MICROS`
+ --> kernel/src/inter.rs:3:101
+  |
+3 | ...program::AccessAttr, scheduler::{QUANTUM_MICROS, get_current_proc, scheduler}, s...
+  |                                     ^^^^^^^^^^^^^^
+
+warning: unused import: `println`
+ --> kernel/src/watchdog.rs:5:29
+  |
+5 | use crate::{mutex::SpinIRQ, println};
+  |                             ^^^^^^^
+
+warning: unused import: `messages::MessageHeader`
+ --> kernel/src/scheduler.rs:3:117
+  |
+3 | ...ueError, SyncMessageQueue}, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}...
+  |                                ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `println`
+ --> kernel/src/mpu.rs:5:70
+  |
+5 | use crate::{inter::CS, mutex::IRQMutex, proc::Proc, program::Region, println};
+  |                                                                      ^^^^^^^
+
+warning: constant `FRAMING_ERROR_SHIFT` is never used
+  --> uart/src/main.rs:41:15
+   |
+41 |     pub const FRAMING_ERROR_SHIFT: usize = 8;
+   |               ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PARITY_ERROR_SHIFT` is never used
+  --> uart/src/main.rs:42:15
+   |
+42 |     pub const PARITY_ERROR_SHIFT: usize = 9;
+   |               ^^^^^^^^^^^^^^^^^^
+
+warning: constant `BREAK_ERROR_SHIFT` is never used
+  --> uart/src/main.rs:43:15
+   |
+43 |     pub const BREAK_ERROR_SHIFT: usize = 10;
+   |               ^^^^^^^^^^^^^^^^^
+
+warning: constant `OVERRUN_ERROR_SHIFT` is never used
+  --> uart/src/main.rs:44:15
+   |
+44 |     pub const OVERRUN_ERROR_SHIFT: usize = 11;
+   |               ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `FRAMING_ERROR_MASK` is never used
+  --> uart/src/main.rs:47:15
+   |
+47 |     pub const FRAMING_ERROR_MASK: u32 = 1 << FRAMING_ERROR_SHIFT;
+   |               ^^^^^^^^^^^^^^^^^^
+
+warning: constant `PARITY_ERROR_MASK` is never used
+  --> uart/src/main.rs:48:15
+   |
+48 |     pub const PARITY_ERROR_MASK: u32 = 1 << PARITY_ERROR_SHIFT;
+   |               ^^^^^^^^^^^^^^^^^
+
+warning: constant `BREAK_ERROR_MASK` is never used
+  --> uart/src/main.rs:49:15
+   |
+49 |     pub const BREAK_ERROR_MASK: u32 = 1 << BREAK_ERROR_SHIFT;
+   |               ^^^^^^^^^^^^^^^^
+
+warning: constant `OVERRUN_ERROR_MASK` is never used
+  --> uart/src/main.rs:50:15
+   |
+50 |     pub const OVERRUN_ERROR_MASK: u32 = 1 << OVERRUN_ERROR_SHIFT;
+   |               ^^^^^^^^^^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+  --> uart/src/main.rs:52:15
+   |
+52 |     pub const VALID_MASK: u32 = DATA_MASK |
+   |               ^^^^^^^^^^
+
+warning: constant `FRAMING_ERROR_SHIFT` is never used
+  --> uart/src/main.rs:61:15
+   |
+61 |     pub const FRAMING_ERROR_SHIFT: usize = 0;
+   |               ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `PARITY_ERROR_SHIFT` is never used
+  --> uart/src/main.rs:62:15
+   |
+62 |     pub const PARITY_ERROR_SHIFT: usize = 1;
+   |               ^^^^^^^^^^^^^^^^^^
+
+warning: constant `BREAK_ERROR_SHIFT` is never used
+  --> uart/src/main.rs:63:15
+   |
+63 |     pub const BREAK_ERROR_SHIFT: usize = 2;
+   |               ^^^^^^^^^^^^^^^^^
+
+warning: constant `OVERRUN_ERROR_SHIFT` is never used
+  --> uart/src/main.rs:64:15
+   |
+64 |     pub const OVERRUN_ERROR_SHIFT: usize = 3;
+   |               ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `FRAMING_ERROR_MASK` is never used
+  --> uart/src/main.rs:66:15
+   |
+66 |     pub const FRAMING_ERROR_MASK: u32 = 1 << FRAMING_ERROR_SHIFT;
+   |               ^^^^^^^^^^^^^^^^^^
+
+warning: constant `PARITY_ERROR_MASK` is never used
+  --> uart/src/main.rs:67:15
+   |
+67 |     pub const PARITY_ERROR_MASK: u32 = 1 << PARITY_ERROR_SHIFT;
+   |               ^^^^^^^^^^^^^^^^^
+
+warning: constant `BREAK_ERROR_MASK` is never used
+  --> uart/src/main.rs:68:15
+   |
+68 |     pub const BREAK_ERROR_MASK: u32 = 1 << BREAK_ERROR_SHIFT;
+   |               ^^^^^^^^^^^^^^^^
+
+warning: constant `OVERRUN_ERROR_MASK` is never used
+  --> uart/src/main.rs:69:15
+   |
+69 |     pub const OVERRUN_ERROR_MASK: u32 = 1 << OVERRUN_ERROR_SHIFT;
+   |               ^^^^^^^^^^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+  --> uart/src/main.rs:71:15
+   |
+71 |     pub const VALID_MASK: u32 = FRAMING_ERROR_MASK |
+   |               ^^^^^^^^^^
+
+warning: constant `CTS_SHIFT` is never used
+  --> uart/src/main.rs:78:15
+   |
+78 |     pub const CTS_SHIFT: usize = 0;
+   |               ^^^^^^^^^
+
+warning: constant `DSR_SHIFT` is never used
+  --> uart/src/main.rs:79:15
+   |
+79 |     pub const DSR_SHIFT: usize = 1;
+   |               ^^^^^^^^^
+
+warning: constant `DCD_SHIFT` is never used
+  --> uart/src/main.rs:80:15
+   |
+80 |     pub const DCD_SHIFT: usize = 2;
+   |               ^^^^^^^^^
+
+warning: constant `RXFF_SHIFT` is never used
+  --> uart/src/main.rs:84:15
+   |
+84 |     pub const RXFF_SHIFT: usize = 6;
+   |               ^^^^^^^^^^
+
+warning: constant `TXFE_SHIFT` is never used
+  --> uart/src/main.rs:85:15
+   |
+85 |     pub const TXFE_SHIFT: usize = 7;
+   |               ^^^^^^^^^^
+
+warning: constant `RI_SHIFT` is never used
+  --> uart/src/main.rs:86:15
+   |
+86 |     pub const RI_SHIFT: usize = 8;
+   |               ^^^^^^^^
+
+warning: constant `CTS_MASK` is never used
+  --> uart/src/main.rs:88:15
+   |
+88 |     pub const CTS_MASK: u32 = 1 << CTS_SHIFT;
+   |               ^^^^^^^^
+
+warning: constant `DSR_MASK` is never used
+  --> uart/src/main.rs:89:15
+   |
+89 |     pub const DSR_MASK: u32 = 1 << DSR_SHIFT;
+   |               ^^^^^^^^
+
+warning: constant `DCD_MASK` is never used
+  --> uart/src/main.rs:90:15
+   |
+90 |     pub const DCD_MASK: u32 = 1 << DCD_SHIFT;
+   |               ^^^^^^^^
+
+warning: constant `RXFF_MASK` is never used
+  --> uart/src/main.rs:94:15
+   |
+94 |     pub const RXFF_MASK: u32 = 1 << RXFF_SHIFT;
+   |               ^^^^^^^^^
+
+warning: constant `TXFE_MASK` is never used
+  --> uart/src/main.rs:95:15
+   |
+95 |     pub const TXFE_MASK: u32 = 1 << TXFE_SHIFT;
+   |               ^^^^^^^^^
+
+warning: constant `RI_MASK` is never used
+  --> uart/src/main.rs:96:15
+   |
+96 |     pub const RI_MASK: u32 = 1 << RI_SHIFT;
+   |               ^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+  --> uart/src/main.rs:98:15
+   |
+98 |     pub const VALID_MASK: u32 = CTS_MASK |
+   |               ^^^^^^^^^^
+
+warning: constant `WLEN_5` is never used
+   --> uart/src/main.rs:142:15
+    |
+142 |     pub const WLEN_5: u32 = 0b00 << WLEN_SHIFT;
+    |               ^^^^^^
+
+warning: constant `WLEN_6` is never used
+   --> uart/src/main.rs:143:15
+    |
+143 |     pub const WLEN_6: u32 = 0b01 << WLEN_SHIFT;
+    |               ^^^^^^
+
+warning: constant `WLEN_7` is never used
+   --> uart/src/main.rs:144:15
+    |
+144 |     pub const WLEN_7: u32 = 0b10 << WLEN_SHIFT;
+    |               ^^^^^^
+
+warning: the feature `assert_matches` has been stable since 1.96.0-nightly and no longer requires an attribute to enable
+ --> kernel/src/main.rs:7:12
+  |
+7 | #![feature(assert_matches)]
+  |            ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(stable_features)]` on by default
+
+warning: constant `DRIVE_2MA` is never used
+  --> pads_bank0/src/main.rs:32:15
+   |
+32 |     pub const DRIVE_2MA: u32 = 0x0 << DRIVE_SHIFT;
+   |               ^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `DRIVE_8MA` is never used
+  --> pads_bank0/src/main.rs:34:15
+   |
+34 |     pub const DRIVE_8MA: u32 = 0x2 << DRIVE_SHIFT;
+   |               ^^^^^^^^^
+
+warning: constant `DRIVE_12MA` is never used
+  --> pads_bank0/src/main.rs:35:15
+   |
+35 |     pub const DRIVE_12MA: u32 = 0x3 << DRIVE_SHIFT;
+   |               ^^^^^^^^^^
+
+warning: the feature `core_intrinsics` is internal to the compiler or standard library
+ --> io_bank0/src/main.rs:2:12
+  |
+2 | #![feature(core_intrinsics)]
+  |            ^^^^^^^^^^^^^^^
+  |
+  = note: using it is strongly discouraged
+  = note: `#[warn(internal_features)]` on by default
+
+warning: unused import: `send`
+  --> io_bank0/src/main.rs:13:120
+   |
+13 | ..., read_header, receive, reply_empty, send, send_empty};
+   |                                         ^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: methods `do_tx_blocking` and `do_rx_blocking` are never used
+   --> i2c/src/main.rs:635:8
+    |
+401 | impl I2C {
+    | -------- methods in this implementation
+...
+635 |     fn do_tx_blocking(&mut self, addr: u8, buffer: &[u8], stop: bool) {
+    |        ^^^^^^^^^^^^^^
+...
+655 |     fn do_rx_blocking(&mut self, addr: u8, buffer: &mut [u8]) {
+    |        ^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `SPEED_STANDARD` is never used
+  --> i2c/src/main.rs:41:15
+   |
+41 |     pub const SPEED_STANDARD: u32 = 0x1 << SPEED_SHIFT;
+   |               ^^^^^^^^^^^^^^
+
+warning: constant `SPEED_HIGH` is never used
+  --> i2c/src/main.rs:43:15
+   |
+43 |     pub const SPEED_HIGH: u32 = 0x3 << SPEED_SHIFT;
+   |               ^^^^^^^^^^
+
+warning: constant `ADDR_SLAVE7` is never used
+  --> i2c/src/main.rs:45:15
+   |
+45 |     pub const ADDR_SLAVE7: u32 = 0 << ADDR_SLAVE_SHIFT;
+   |               ^^^^^^^^^^^
+
+warning: constant `ADDR_SLAVE10` is never used
+  --> i2c/src/main.rs:46:15
+   |
+46 |     pub const ADDR_SLAVE10: u32 = 1 << ADDR_SLAVE_SHIFT;
+   |               ^^^^^^^^^^^^
+
+warning: constant `ADDR_MASTER10` is never used
+  --> i2c/src/main.rs:49:15
+   |
+49 |     pub const ADDR_MASTER10: u32 = 1 << ADDR_MASTER_SHIFT;
+   |               ^^^^^^^^^^^^^
+
+warning: constant `GC_OR_START_SHIFT` is never used
+  --> i2c/src/main.rs:65:15
+   |
+65 |     pub const GC_OR_START_SHIFT: usize = 10;
+   |               ^^^^^^^^^^^^^^^^^
+
+warning: constant `SPECIAL_SHIFT` is never used
+  --> i2c/src/main.rs:66:15
+   |
+66 |     pub const SPECIAL_SHIFT: usize = 11;
+   |               ^^^^^^^^^^^^^
+
+warning: constant `GC_OR_START_MASK` is never used
+  --> i2c/src/main.rs:69:15
+   |
+69 |     pub const GC_OR_START_MASK: u32 = 1 << GC_OR_START_SHIFT;
+   |               ^^^^^^^^^^^^^^^^
+
+warning: constant `SPECIAL_MASK` is never used
+  --> i2c/src/main.rs:70:15
+   |
+70 |     pub const SPECIAL_MASK: u32 = 1 << SPECIAL_SHIFT;
+   |               ^^^^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+  --> i2c/src/main.rs:72:15
+   |
+72 |     pub const VALID_MASK: u32 = TARGET_MASK |
+   |               ^^^^^^^^^^
+
+warning: constant `SLAVE_SHIFT` is never used
+  --> i2c/src/main.rs:78:15
+   |
+78 |     pub const SLAVE_SHIFT: usize = 0;
+   |               ^^^^^^^^^^^
+
+warning: constant `SLAVE_MASK` is never used
+  --> i2c/src/main.rs:80:15
+   |
+80 |     pub const SLAVE_MASK: u32 = 0x3ff << SLAVE_SHIFT;
+   |               ^^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+  --> i2c/src/main.rs:82:15
+   |
+82 |     pub const VALID_MASK: u32 = SLAVE_MASK;
+   |               ^^^^^^^^^^
+
+warning: constant `FIRST_DATA_BYTE_SHIFT` is never used
+  --> i2c/src/main.rs:90:15
+   |
+90 |     pub const FIRST_DATA_BYTE_SHIFT: usize = 11;
+   |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `FIRST_DATA_BYTE_MASK` is never used
+  --> i2c/src/main.rs:96:15
+   |
+96 |     pub const FIRST_DATA_BYTE_MASK: u32 = 1 << FIRST_DATA_BYTE_SHIFT;
+   |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+  --> i2c/src/main.rs:98:15
+   |
+98 |     pub const VALID_MASK: u32 = DATA_MASK |
+   |               ^^^^^^^^^^
+
+warning: constant `CLEAR_SHIFT` is never used
+   --> i2c/src/main.rs:174:15
+    |
+174 |     pub const CLEAR_SHIFT: usize = 0;
+    |               ^^^^^^^^^^^
+
+warning: constant `CLEAR_MASK` is never used
+   --> i2c/src/main.rs:176:15
+    |
+176 |     pub const CLEAR_MASK: u32 = 1 << CLEAR_SHIFT;
+    |               ^^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+   --> i2c/src/main.rs:178:15
+    |
+178 |     pub const VALID_MASK: u32 = CLEAR_MASK;
+    |               ^^^^^^^^^^
+
+warning: constant `ACTIVITY_SHIFT` is never used
+   --> i2c/src/main.rs:196:15
+    |
+196 |     pub const ACTIVITY_SHIFT: usize = 0;
+    |               ^^^^^^^^^^^^^^
+
+warning: constant `TX_EMPTY_SHIFT` is never used
+   --> i2c/src/main.rs:198:15
+    |
+198 |     pub const TX_EMPTY_SHIFT: usize = 2;
+    |               ^^^^^^^^^^^^^^
+
+warning: constant `MASTER_ACTIVITY_SHIFT` is never used
+   --> i2c/src/main.rs:201:15
+    |
+201 |     pub const MASTER_ACTIVITY_SHIFT: usize = 5;
+    |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `SLAVE_ACTIVITY_SHIFT` is never used
+   --> i2c/src/main.rs:202:15
+    |
+202 |     pub const SLAVE_ACTIVITY_SHIFT: usize = 6;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ACTIVITY_MASK` is never used
+   --> i2c/src/main.rs:204:15
+    |
+204 |     pub const ACTIVITY_MASK: u32 = 1 << ACTIVITY_SHIFT;
+    |               ^^^^^^^^^^^^^
+
+warning: constant `TX_EMPTY_MASK` is never used
+   --> i2c/src/main.rs:206:15
+    |
+206 |     pub const TX_EMPTY_MASK: u32 = 1 << TX_EMPTY_SHIFT;
+    |               ^^^^^^^^^^^^^
+
+warning: constant `MASTER_ACTIVITY_MASK` is never used
+   --> i2c/src/main.rs:209:15
+    |
+209 |     pub const MASTER_ACTIVITY_MASK: u32 = 1 << MASTER_ACTIVITY_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `SLAVE_ACTIVITY_MASK` is never used
+   --> i2c/src/main.rs:210:15
+    |
+210 |     pub const SLAVE_ACTIVITY_MASK: u32 = 1 << SLAVE_ACTIVITY_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+   --> i2c/src/main.rs:212:15
+    |
+212 |     pub const VALID_MASK: u32 = ACTIVITY_MASK |
+    |               ^^^^^^^^^^
+
+warning: constant `LEVEL_SHIFT` is never used
+   --> i2c/src/main.rs:222:15
+    |
+222 |     pub const LEVEL_SHIFT: usize = 0;
+    |               ^^^^^^^^^^^
+
+warning: constant `LEVEL_MASK` is never used
+   --> i2c/src/main.rs:224:15
+    |
+224 |     pub const LEVEL_MASK: u32 = 0x1f << LEVEL_SHIFT;
+    |               ^^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+   --> i2c/src/main.rs:226:15
+    |
+226 |     pub const VALID_MASK: u32 = LEVEL_MASK;
+    |               ^^^^^^^^^^
+
+warning: constant `ADDR7_NO_ACK_SHIFT` is never used
+   --> i2c/src/main.rs:241:15
+    |
+241 |     pub const ADDR7_NO_ACK_SHIFT: usize = 0;
+    |               ^^^^^^^^^^^^^^^^^^
+
+warning: constant `ADDR10_NO_ACK1_SHIFT` is never used
+   --> i2c/src/main.rs:242:15
+    |
+242 |     pub const ADDR10_NO_ACK1_SHIFT: usize = 1;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ADDR10_NO_ACK2_SHIFT` is never used
+   --> i2c/src/main.rs:243:15
+    |
+243 |     pub const ADDR10_NO_ACK2_SHIFT: usize = 2;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `TX_DATA_NO_ACK_SHIFT` is never used
+   --> i2c/src/main.rs:244:15
+    |
+244 |     pub const TX_DATA_NO_ACK_SHIFT: usize = 3;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `GCALL_NO_ACK_SHIFT` is never used
+   --> i2c/src/main.rs:245:15
+    |
+245 |     pub const GCALL_NO_ACK_SHIFT: usize = 4;
+    |               ^^^^^^^^^^^^^^^^^^
+
+warning: constant `GCALL_READ_SHIFT` is never used
+   --> i2c/src/main.rs:246:15
+    |
+246 |     pub const GCALL_READ_SHIFT: usize = 5;
+    |               ^^^^^^^^^^^^^^^^
+
+warning: constant `HIGH_SPEED_ACK_SHIFT` is never used
+   --> i2c/src/main.rs:247:15
+    |
+247 |     pub const HIGH_SPEED_ACK_SHIFT: usize = 6;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `START_ACK_SHIFT` is never used
+   --> i2c/src/main.rs:248:15
+    |
+248 |     pub const START_ACK_SHIFT: usize = 7;
+    |               ^^^^^^^^^^^^^^^
+
+warning: constant `HIGH_SPEED_NO_RESTART_SHIFT` is never used
+   --> i2c/src/main.rs:249:15
+    |
+249 |     pub const HIGH_SPEED_NO_RESTART_SHIFT: usize = 8;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `START_NO_RESTART_SHIFT` is never used
+   --> i2c/src/main.rs:250:15
+    |
+250 |     pub const START_NO_RESTART_SHIFT: usize = 9;
+    |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ADDR10_READ_NO_RESTART_SHIFT` is never used
+   --> i2c/src/main.rs:251:15
+    |
+251 |     pub const ADDR10_READ_NO_RESTART_SHIFT: usize = 10;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `MASTER_DISABLE_SHIFT` is never used
+   --> i2c/src/main.rs:252:15
+    |
+252 |     pub const MASTER_DISABLE_SHIFT: usize = 11;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ARBITRATION_LOST_SHIFT` is never used
+   --> i2c/src/main.rs:253:15
+    |
+253 |     pub const ARBITRATION_LOST_SHIFT: usize = 12;
+    |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `TX_FLUSH_SHIFT` is never used
+   --> i2c/src/main.rs:254:15
+    |
+254 |     pub const TX_FLUSH_SHIFT: usize = 13;
+    |               ^^^^^^^^^^^^^^
+
+warning: constant `SLAVE_ARBITRATION_LOST_SHIFT` is never used
+   --> i2c/src/main.rs:255:15
+    |
+255 |     pub const SLAVE_ARBITRATION_LOST_SHIFT: usize = 14;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `SLAVE_READ_SHIFT` is never used
+   --> i2c/src/main.rs:256:15
+    |
+256 |     pub const SLAVE_READ_SHIFT: usize = 15;
+    |               ^^^^^^^^^^^^^^^^
+
+warning: constant `USER_ABORT_SHIFT` is never used
+   --> i2c/src/main.rs:257:15
+    |
+257 |     pub const USER_ABORT_SHIFT: usize = 16;
+    |               ^^^^^^^^^^^^^^^^
+
+warning: constant `TX_FLUSH_COUNT_SHIFT` is never used
+   --> i2c/src/main.rs:258:15
+    |
+258 |     pub const TX_FLUSH_COUNT_SHIFT: usize = 23;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ADDR7_NO_ACK_MASK` is never used
+   --> i2c/src/main.rs:260:15
+    |
+260 |     pub const ADDR7_NO_ACK_MASK: u32 = 1 << ADDR7_NO_ACK_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^
+
+warning: constant `ADDR10_NO_ACK1_MASK` is never used
+   --> i2c/src/main.rs:261:15
+    |
+261 |     pub const ADDR10_NO_ACK1_MASK: u32 = 1 << ADDR10_NO_ACK1_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ADDR10_NO_ACK2_MASK` is never used
+   --> i2c/src/main.rs:262:15
+    |
+262 |     pub const ADDR10_NO_ACK2_MASK: u32 = 1 << ADDR10_NO_ACK2_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `TX_DATA_NO_ACK_MASK` is never used
+   --> i2c/src/main.rs:263:15
+    |
+263 |     pub const TX_DATA_NO_ACK_MASK: u32 = 1 << TX_DATA_NO_ACK_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `GCALL_NO_ACK_MASK` is never used
+   --> i2c/src/main.rs:264:15
+    |
+264 |     pub const GCALL_NO_ACK_MASK: u32 = 1 << GCALL_NO_ACK_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^
+
+warning: constant `GCALL_READ_MASK` is never used
+   --> i2c/src/main.rs:265:15
+    |
+265 |     pub const GCALL_READ_MASK: u32 = 1 << GCALL_READ_SHIFT;
+    |               ^^^^^^^^^^^^^^^
+
+warning: constant `HIGH_SPEED_ACK_MASK` is never used
+   --> i2c/src/main.rs:266:15
+    |
+266 |     pub const HIGH_SPEED_ACK_MASK: u32 = 1 << HIGH_SPEED_ACK_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `START_ACK_MASK` is never used
+   --> i2c/src/main.rs:267:15
+    |
+267 |     pub const START_ACK_MASK: u32 = 1 << START_ACK_SHIFT;
+    |               ^^^^^^^^^^^^^^
+
+warning: constant `HIGH_SPEED_NO_RESTART_MASK` is never used
+   --> i2c/src/main.rs:268:15
+    |
+268 |     pub const HIGH_SPEED_NO_RESTART_MASK: u32 = 1 << HIGH_SPEED_NO_RESTART_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `START_NO_RESTART_MASK` is never used
+   --> i2c/src/main.rs:269:15
+    |
+269 |     pub const START_NO_RESTART_MASK: u32 = 1 << START_NO_RESTART_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ADDR10_READ_NO_RESTART_MASK` is never used
+   --> i2c/src/main.rs:270:15
+    |
+270 |     pub const ADDR10_READ_NO_RESTART_MASK: u32 = 1 << ADDR10_READ_NO_RESTART_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `MASTER_DISABLE_MASK` is never used
+   --> i2c/src/main.rs:271:15
+    |
+271 |     pub const MASTER_DISABLE_MASK: u32 = 1 << MASTER_DISABLE_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ARBITRATION_LOST_MASK` is never used
+   --> i2c/src/main.rs:272:15
+    |
+272 |     pub const ARBITRATION_LOST_MASK: u32 = 1 << ARBITRATION_LOST_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `TX_FLUSH_MASK` is never used
+   --> i2c/src/main.rs:273:15
+    |
+273 |     pub const TX_FLUSH_MASK: u32 = 1 << TX_FLUSH_SHIFT;
+    |               ^^^^^^^^^^^^^
+
+warning: constant `SLAVE_ARBITRATION_LOST_MASK` is never used
+   --> i2c/src/main.rs:274:15
+    |
+274 |     pub const SLAVE_ARBITRATION_LOST_MASK: u32 = 1 << SLAVE_ARBITRATION_LOST_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `SLAVE_READ_MASK` is never used
+   --> i2c/src/main.rs:275:15
+    |
+275 |     pub const SLAVE_READ_MASK: u32 = 1 << SLAVE_READ_SHIFT;
+    |               ^^^^^^^^^^^^^^^
+
+warning: constant `USER_ABORT_MASK` is never used
+   --> i2c/src/main.rs:276:15
+    |
+276 |     pub const USER_ABORT_MASK: u32 = 1 << USER_ABORT_SHIFT;
+    |               ^^^^^^^^^^^^^^^
+
+warning: constant `TX_FLUSH_COUNT_MASK` is never used
+   --> i2c/src/main.rs:277:15
+    |
+277 |     pub const TX_FLUSH_COUNT_MASK: u32 = 0x1ff << TX_FLUSH_COUNT_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+   --> i2c/src/main.rs:279:15
+    |
+279 |     pub const VALID_MASK: u32 = ADDR7_NO_ACK_MASK |
+    |               ^^^^^^^^^^
+
+warning: constant `NACK_SHIFT` is never used
+   --> i2c/src/main.rs:300:15
+    |
+300 |     pub const NACK_SHIFT: usize = 0;
+    |               ^^^^^^^^^^
+
+warning: constant `NACK_MASK` is never used
+   --> i2c/src/main.rs:302:15
+    |
+302 |     pub const NACK_MASK: u32 = 1 << NACK_SHIFT;
+    |               ^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+   --> i2c/src/main.rs:304:15
+    |
+304 |     pub const VALID_MASK: u32 = NACK_MASK;
+    |               ^^^^^^^^^^
+
+warning: constant `SDA_SETUP_SHIFT` is never used
+   --> i2c/src/main.rs:308:15
+    |
+308 |     pub const SDA_SETUP_SHIFT: usize = 0;
+    |               ^^^^^^^^^^^^^^^
+
+warning: constant `SDA_SETUP_MASK` is never used
+   --> i2c/src/main.rs:310:15
+    |
+310 |     pub const SDA_SETUP_MASK: u32 = 0xff << SDA_SETUP_SHIFT;
+    |               ^^^^^^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+   --> i2c/src/main.rs:312:15
+    |
+312 |     pub const VALID_MASK: u32 = SDA_SETUP_MASK;
+    |               ^^^^^^^^^^
+
+warning: constant `ACK_GENERAL_CALL_SHIFT` is never used
+   --> i2c/src/main.rs:316:15
+    |
+316 |     pub const ACK_GENERAL_CALL_SHIFT: usize = 0;
+    |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ACK_GENERAL_CALL_MASK` is never used
+   --> i2c/src/main.rs:318:15
+    |
+318 |     pub const ACK_GENERAL_CALL_MASK: u32 = 1 << ACK_GENERAL_CALL_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ACK_GENERAL_CALL_ACK` is never used
+   --> i2c/src/main.rs:320:15
+    |
+320 |     pub const ACK_GENERAL_CALL_ACK: u32 = 1 << ACK_GENERAL_CALL_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ACK_GENERAL_CALL_NACK` is never used
+   --> i2c/src/main.rs:321:15
+    |
+321 |     pub const ACK_GENERAL_CALL_NACK: u32 = 0 << ACK_GENERAL_CALL_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+   --> i2c/src/main.rs:323:15
+    |
+323 |     pub const VALID_MASK: u32 = ACK_GENERAL_CALL_MASK;
+    |               ^^^^^^^^^^
+
+warning: constant `SLAVE_DISABLE_BUSY_SHIFT` is never used
+   --> i2c/src/main.rs:328:15
+    |
+328 |     pub const SLAVE_DISABLE_BUSY_SHIFT: usize = 1;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `SLAVE_RX_DATA_LOST_SHIFT` is never used
+   --> i2c/src/main.rs:329:15
+    |
+329 |     pub const SLAVE_RX_DATA_LOST_SHIFT: usize = 2;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `SLAVE_DISABLE_BUSY_MASK` is never used
+   --> i2c/src/main.rs:332:15
+    |
+332 |     pub const SLAVE_DISABLE_BUSY_MASK: u32 = 1 << SLAVE_DISABLE_BUSY_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `SLAVE_RX_DATA_LOST_MASK` is never used
+   --> i2c/src/main.rs:333:15
+    |
+333 |     pub const SLAVE_RX_DATA_LOST_MASK: u32 = 1 << SLAVE_RX_DATA_LOST_SHIFT;
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `VALID_MASK` is never used
+   --> i2c/src/main.rs:335:15
+    |
+335 |     pub const VALID_MASK: u32 = ENABLED_MASK |
+    |               ^^^^^^^^^^
+
+warning: multiple variants are never constructed
+   --> camera/src/main.rs:134:5
+    |
+133 | enum CamReg {
+    |      ------ variants in this enum
+134 |     Test = 0x0,
+    |     ^^^^
+135 |     CapCtrl = 0x1,
+136 |     SensorTiming = 0x3,
+    |     ^^^^^^^^^^^^
+137 |     FifoCtrl = 0x4,
+138 |     TestMode = 0x5,
+    |     ^^^^^^^^
+...
+142 |     SingleFIFO = 0x3d,
+    |     ^^^^^^^^^^
+143 |     Version = 0x40,
+    |     ^^^^^^^
+...
+149 |     Year = 0x46,
+    |     ^^^^
+150 |     Month = 0x47,
+    |     ^^^^^
+151 |     Date = 0x48
+    |     ^^^^
+    |
+    = note: `CamReg` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: multiple variants are never constructed
+   --> camera/src/main.rs:166:5
+    |
+155 | enum DSPReg {
+    |      ------ variants in this enum
+...
+166 |     QuantizationScale = 0x44,
+    |     ^^^^^^^^^^^^^^^^^
+...
+174 |     DPSel = 0x56,
+    |     ^^^^^
+...
+227 |     MasterSpeed = 0xf0,
+    |     ^^^^^^^^^^^
+228 |     SlaveID = 0xf7,
+    |     ^^^^^^^
+229 |     SlaveCtrl = 0xf8,
+    |     ^^^^^^^^^
+230 |     MCBist = 0xf9,
+231 |     ProgMemAddr0 = 0xfa,
+    |     ^^^^^^^^^^^^
+232 |     ProgMemAddr1 = 0xfb,
+    |     ^^^^^^^^^^^^
+233 |     ProgMemAccess = 0xfc,
+    |     ^^^^^^^^^^^^^
+234 |     ProtocolCmd = 0xfd,
+    |     ^^^^^^^^^^^
+235 |     ProtocolStatus = 0xfe,
+    |     ^^^^^^^^^^^^^^
+236 |     BankSelect = 0xff,
+    |     ^^^^^^^^^^
+    |
+    = note: `DSPReg` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: multiple variants are never constructed
+   --> camera/src/main.rs:241:5
+    |
+240 | enum SensorReg {
+    |      --------- variants in this enum
+241 |     Gain = 0x00,
+    |     ^^^^
+...
+246 |     Reg8 = 0x08,
+    |     ^^^^
+247 |     Com2 = 0x09,
+248 |     ProdIDNum1 = 0x0a,
+    |     ^^^^^^^^^^
+249 |     ProdIDNum2 = 0x0b,
+    |     ^^^^^^^^^^
+...
+253 |     AutoExpCtrl = 0x10,
+    |     ^^^^^^^^^^^
+...
+264 |     Manufacture1 = 0x1c,
+    |     ^^^^^^^^^^^^
+265 |     Manufacture0 = 0x1d,
+    |     ^^^^^^^^^^^^
+...
+274 |     Reg2A = 0x2a,
+    |     ^^^^^
+275 |     FrameRate = 0x2b,
+    |     ^^^^^^^^^
+276 |     Reserved2C = 0x2c,
+277 |     VSyncPulse0 = 0x2d,
+    |     ^^^^^^^^^^^
+278 |     VSyncPulse1 = 0x2e,
+    |     ^^^^^^^^^^^
+279 |     LuminanceAvg = 0x2f,
+    |     ^^^^^^^^^^^^
+280 |     HSyncStart = 0x30,
+    |     ^^^^^^^^^^
+281 |     HSyncEnd = 0x31,
+    |     ^^^^^^^^
+...
+296 |     Reg45 = 0x45,
+    |     ^^^^^
+297 |     FrameLength0 = 0x46,
+298 |     FrameLength1 = 0x47,
+    |     ^^^^^^^^^^^^
+299 |     Com19 = 0x48,
+300 |     Zoom = 0x49,
+    |     ^^^^
+301 |     Reserved4A = 0x4a,
+302 |     Com22 = 0x4b,
+    |     ^^^^^
+303 |     Reserved4C = 0x4c,
+304 |     Com25 = 0x4e,
+    |     ^^^^^
+    |
+    = note: `SensorReg` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: constant `SVGA` is never used
+    --> camera/src/main.rs:1097:7
+     |
+1097 | const SVGA: [(I2CReg, u8); 173] = [
+     |       ^^^^
+
+warning: constant `I2C_MAX_READ_SIZE` is never used
+    --> camera/src/main.rs:1280:7
+     |
+1280 | const I2C_MAX_READ_SIZE: usize = 32;
+     |       ^^^^^^^^^^^^^^^^^
+
+warning: function `i2c_read_dsp_reg` is never used
+    --> camera/src/main.rs:1306:4
+     |
+1306 | fn i2c_read_dsp_reg(reg: DSPReg) -> u8 {
+     |    ^^^^^^^^^^^^^^^^
+
+warning: function `i2c_read_sensor_reg` is never used
+    --> camera/src/main.rs:1312:4
+     |
+1312 | fn i2c_read_sensor_reg(reg: SensorReg) -> u8 {
+     |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `get_sensor_manufacture` is never used
+    --> camera/src/main.rs:1328:4
+     |
+1328 | fn get_sensor_manufacture() -> u16 {
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `FRAMES_MASK` is never used
+  --> camera/src/main.rs:25:15
+   |
+25 |     pub const FRAMES_MASK: u8 = 0xff << FRAMES_SHIFT;
+   |               ^^^^^^^^^^^
+
+warning: constant `HSYNC_POLARITY_SHIFT` is never used
+  --> camera/src/main.rs:29:15
+   |
+29 |     pub const HSYNC_POLARITY_SHIFT: usize = 0;
+   |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `VSYNC_POLARITY_SHIFT` is never used
+  --> camera/src/main.rs:30:15
+   |
+30 |     pub const VSYNC_POLARITY_SHIFT: usize = 1;
+   |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `PCLK_REVERSE_SHIFT` is never used
+  --> camera/src/main.rs:31:15
+   |
+31 |     pub const PCLK_REVERSE_SHIFT: usize = 3;
+   |               ^^^^^^^^^^^^^^^^^^
+
+warning: constant `HSYNC_POLARITY_MASK` is never used
+  --> camera/src/main.rs:33:15
+   |
+33 |     pub const HSYNC_POLARITY_MASK: u8 = 1 << HSYNC_POLARITY_SHIFT;
+   |               ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `VSYNC_POLARITY_MASK` is never used
+  --> camera/src/main.rs:34:15
+   |
+34 |     pub const VSYNC_POLARITY_MASK: u8 = 1 << VSYNC_POLARITY_SHIFT;
+   |               ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `PCLK_REVERSE_MASK` is never used
+  --> camera/src/main.rs:35:15
+   |
+35 |     pub const PCLK_REVERSE_MASK: u8 = 1 << PCLK_REVERSE_SHIFT;
+   |               ^^^^^^^^^^^^^^^^^
+
+warning: constant `CAM_SHIFT` is never used
+  --> camera/src/main.rs:49:15
+   |
+49 |     pub const CAM_SHIFT: usize = 0;
+   |               ^^^^^^^^^
+
+warning: constant `TEST_DATA_SHIFT` is never used
+  --> camera/src/main.rs:50:15
+   |
+50 |     pub const TEST_DATA_SHIFT: usize = 1;
+   |               ^^^^^^^^^^^^^^^
+
+warning: constant `CAM_MASK` is never used
+  --> camera/src/main.rs:52:15
+   |
+52 |     pub const CAM_MASK: u8 = 1 << CAM_SHIFT;
+   |               ^^^^^^^^
+
+warning: constant `TEST_DATA_MASK` is never used
+  --> camera/src/main.rs:53:15
+   |
+53 |     pub const TEST_DATA_MASK: u8 = 1 << TEST_DATA_SHIFT;
+   |               ^^^^^^^^^^^^^^
+
+warning: constant `RESET_IO_SHIFT` is never used
+  --> camera/src/main.rs:57:15
+   |
+57 |     pub const RESET_IO_SHIFT: usize = 0;
+   |               ^^^^^^^^^^^^^^
+
+warning: constant `RESET_IO_MASK` is never used
+  --> camera/src/main.rs:61:15
+   |
+61 |     pub const RESET_IO_MASK: u8 = 1 << RESET_IO_SHIFT;
+   |               ^^^^^^^^^^^^^
+
+warning: constant `DECIMAL_SHIFT` is never used
+  --> camera/src/main.rs:73:15
+   |
+73 |     pub const DECIMAL_SHIFT: usize = 0;
+   |               ^^^^^^^^^^^^^
+
+warning: constant `INTEGER_SHIFT` is never used
+  --> camera/src/main.rs:74:15
+   |
+74 |     pub const INTEGER_SHIFT: usize = 4;
+   |               ^^^^^^^^^^^^^
+
+warning: constant `DECIMAL_MASK` is never used
+  --> camera/src/main.rs:76:15
+   |
+76 |     pub const DECIMAL_MASK: u8 = 0xf << DECIMAL_SHIFT;
+   |               ^^^^^^^^^^^^
+
+warning: constant `INTEGER_MASK` is never used
+  --> camera/src/main.rs:77:15
+   |
+77 |     pub const INTEGER_MASK: u8 = 0xf << INTEGER_SHIFT;
+   |               ^^^^^^^^^^^^
+
+warning: constant `VSYNC_SHIFT` is never used
+  --> camera/src/main.rs:81:15
+   |
+81 |     pub const VSYNC_SHIFT: usize = 0;
+   |               ^^^^^^^^^^^
+
+warning: constant `EXTERNAL_TRIGGER_SHIFT` is never used
+  --> camera/src/main.rs:82:15
+   |
+82 |     pub const EXTERNAL_TRIGGER_SHIFT: usize = 1;
+   |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `VSYNC_MASK` is never used
+  --> camera/src/main.rs:85:15
+   |
+85 |     pub const VSYNC_MASK: u8 = 1 << VSYNC_SHIFT;
+   |               ^^^^^^^^^^
+
+warning: constant `EXTERNAL_TRIGGER_MASK` is never used
+  --> camera/src/main.rs:86:15
+   |
+86 |     pub const EXTERNAL_TRIGGER_MASK: u8 = 1 << EXTERNAL_TRIGGER_SHIFT;
+   |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `SIZE_SHIFT` is never used
+  --> camera/src/main.rs:91:15
+   |
+91 |     pub const SIZE_SHIFT: usize = 0;
+   |               ^^^^^^^^^^
+
+warning: constant `SIZE_MASK` is never used
+  --> camera/src/main.rs:93:15
+   |
+93 |     pub const SIZE_MASK: u8 = 0xff << SIZE_SHIFT;
+   |               ^^^^^^^^^
+
+warning: constant `SIZE_SHIFT` is never used
+  --> camera/src/main.rs:97:15
+   |
+97 |     pub const SIZE_SHIFT: usize = 0;
+   |               ^^^^^^^^^^
+
+warning: constant `SIZE_MASK` is never used
+  --> camera/src/main.rs:99:15
+   |
+99 |     pub const SIZE_MASK: u8 = 0xff << SIZE_SHIFT;
+   |               ^^^^^^^^^
+
+warning: constant `SIZE_SHIFT` is never used
+   --> camera/src/main.rs:103:15
+    |
+103 |     pub const SIZE_SHIFT: usize = 0;
+    |               ^^^^^^^^^^
+
+warning: constant `SIZE_MASK` is never used
+   --> camera/src/main.rs:105:15
+    |
+105 |     pub const SIZE_MASK: u8 = 0xff << SIZE_SHIFT;
+    |               ^^^^^^^^^
+
+warning: constant `YEAR_SHIFT` is never used
+   --> camera/src/main.rs:115:15
+    |
+115 |     pub const YEAR_SHIFT: usize = 0;
+    |               ^^^^^^^^^^
+
+warning: constant `YEAR_MASK` is never used
+   --> camera/src/main.rs:117:15
+    |
+117 |     pub const YEAR_MASK: u8 = 0x7f << YEAR_SHIFT;
+    |               ^^^^^^^^^
+
+warning: constant `MONTH_SHIFT` is never used
+   --> camera/src/main.rs:121:15
+    |
+121 |     pub const MONTH_SHIFT: usize = 0;
+    |               ^^^^^^^^^^^
+
+warning: constant `MONTH_MASK` is never used
+   --> camera/src/main.rs:123:15
+    |
+123 |     pub const MONTH_MASK: u8 = 0xf << MONTH_SHIFT;
+    |               ^^^^^^^^^^
+
+warning: constant `DATE_SHIFT` is never used
+   --> camera/src/main.rs:127:15
+    |
+127 |     pub const DATE_SHIFT: usize = 0;
+    |               ^^^^^^^^^^
+
+warning: constant `DATE_MASK` is never used
+   --> camera/src/main.rs:129:15
+    |
+129 |     pub const DATE_MASK: u8 = 0x1f << DATE_SHIFT;
+    |               ^^^^^^^^^
+
+warning: constant `JPEG_160x120` should have an upper case name
+   --> camera/src/main.rs:734:7
+    |
+734 | const JPEG_160x120: [(I2CReg, u8); 37] = [
+    |       ^^^^^^^^^^^^
+    |
+    = note: `#[warn(non_upper_case_globals)]` (part of `#[warn(nonstandard_style)]`) on by default
+help: convert the identifier to upper case (notice the capitalization)
+    |
+734 - const JPEG_160x120: [(I2CReg, u8); 37] = [
+734 + const JPEG_160X120: [(I2CReg, u8); 37] = [
+    |
+
+warning: constant `FUNCSEL_MIN` is never used
+  --> io_bank0/src/main.rs:28:15
+   |
+28 |     pub const FUNCSEL_MIN: u32 = 1;
+   |               ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `JPEG_176x144` should have an upper case name
+   --> camera/src/main.rs:774:7
+    |
+774 | const JPEG_176x144: [(I2CReg, u8); 37] = [
+    |       ^^^^^^^^^^^^
+    |
+help: convert the identifier to upper case (notice the capitalization)
+    |
+774 - const JPEG_176x144: [(I2CReg, u8); 37] = [
+774 + const JPEG_176X144: [(I2CReg, u8); 37] = [
+    |
+
+warning: constant `JPEG_320x240` should have an upper case name
+   --> camera/src/main.rs:814:7
+    |
+814 | const JPEG_320x240: [(I2CReg, u8); 37] = [
+    |       ^^^^^^^^^^^^
+    |
+help: convert the identifier to upper case (notice the capitalization)
+    |
+814 - const JPEG_320x240: [(I2CReg, u8); 37] = [
+814 + const JPEG_320X240: [(I2CReg, u8); 37] = [
+    |
+
+warning: constant `JPEG_352x288` should have an upper case name
+   --> camera/src/main.rs:854:7
+    |
+854 | const JPEG_352x288: [(I2CReg, u8); 37] = [
+    |       ^^^^^^^^^^^^
+    |
+help: convert the identifier to upper case (notice the capitalization)
+    |
+854 - const JPEG_352x288: [(I2CReg, u8); 37] = [
+854 + const JPEG_352X288: [(I2CReg, u8); 37] = [
+    |
+
+warning: constant `JPEG_640x480` should have an upper case name
+   --> camera/src/main.rs:894:7
+    |
+894 | const JPEG_640x480: [(I2CReg, u8); 38] = [
+    |       ^^^^^^^^^^^^
+    |
+help: convert the identifier to upper case (notice the capitalization)
+    |
+894 - const JPEG_640x480: [(I2CReg, u8); 38] = [
+894 + const JPEG_640X480: [(I2CReg, u8); 38] = [
+    |
+
+warning: constant `JPEG_800x600` should have an upper case name
+   --> camera/src/main.rs:935:7
+    |
+935 | const JPEG_800x600: [(I2CReg, u8); 38] = [
+    |       ^^^^^^^^^^^^
+    |
+help: convert the identifier to upper case (notice the capitalization)
+    |
+935 - const JPEG_800x600: [(I2CReg, u8); 38] = [
+935 + const JPEG_800X600: [(I2CReg, u8); 38] = [
+    |
+
+warning: constant `FUNCSEL_MAX` is never used
+  --> io_bank0/src/main.rs:29:15
+   |
+29 |     pub const FUNCSEL_MAX: u32 = 9;
+   |               ^^^^^^^^^^^
+
+warning: constant `FUNCSEL_NULL` is never used
+  --> io_bank0/src/main.rs:30:15
+   |
+30 |     pub const FUNCSEL_NULL: u32 = 31;
+   |               ^^^^^^^^^^^^
+
+warning: constant `OUTOVER_INVERT` is never used
+  --> io_bank0/src/main.rs:33:15
+   |
+33 |     pub const OUTOVER_INVERT: u32 = 0x1 << OUTOVER_SHIFT;
+   |               ^^^^^^^^^^^^^^
+
+warning: constant `OUTOVER_LOW` is never used
+  --> io_bank0/src/main.rs:34:15
+   |
+34 |     pub const OUTOVER_LOW: u32 = 0x2 << OUTOVER_SHIFT;
+   |               ^^^^^^^^^^^
+
+warning: constant `OUTOVER_HIGH` is never used
+  --> io_bank0/src/main.rs:35:15
+   |
+35 |     pub const OUTOVER_HIGH: u32 = 0x3 << OUTOVER_SHIFT;
+   |               ^^^^^^^^^^^^
+
+warning: constant `OEOVER_INVERT` is never used
+  --> io_bank0/src/main.rs:38:15
+   |
+38 |     pub const OEOVER_INVERT: u32 = 0x1 << OEOVER_SHIFT;
+   |               ^^^^^^^^^^^^^
+
+warning: constant `OEOVER_DISABLE` is never used
+  --> io_bank0/src/main.rs:39:15
+   |
+39 |     pub const OEOVER_DISABLE: u32 = 0x2 << OEOVER_SHIFT;
+   |               ^^^^^^^^^^^^^^
+
+warning: constant `OEOVER_ENABLE` is never used
+  --> io_bank0/src/main.rs:40:15
+   |
+40 |     pub const OEOVER_ENABLE: u32 = 0x3 << OEOVER_SHIFT;
+   |               ^^^^^^^^^^^^^
+
+warning: constant `INOVER_INVERT` is never used
+  --> io_bank0/src/main.rs:43:15
+   |
+43 |     pub const INOVER_INVERT: u32 = 0x1 << INOVER_SHIFT;
+   |               ^^^^^^^^^^^^^
+
+warning: constant `INOVER_LOW` is never used
+  --> io_bank0/src/main.rs:44:15
+   |
+44 |     pub const INOVER_LOW: u32 = 0x2 << INOVER_SHIFT;
+   |               ^^^^^^^^^^
+
+warning: constant `INOVER_HIGH` is never used
+  --> io_bank0/src/main.rs:45:15
+   |
+45 |     pub const INOVER_HIGH: u32 = 0x3 << INOVER_SHIFT;
+   |               ^^^^^^^^^^^
+
+warning: constant `IRQOVER_INVERT` is never used
+  --> io_bank0/src/main.rs:48:15
+   |
+48 |     pub const IRQOVER_INVERT: u32 = 0x1 << IRQOVER_SHIFT;
+   |               ^^^^^^^^^^^^^^
+
+warning: constant `IRQOVER_LOW` is never used
+  --> io_bank0/src/main.rs:49:15
+   |
+49 |     pub const IRQOVER_LOW: u32 = 0x2 << IRQOVER_SHIFT;
+   |               ^^^^^^^^^^^
+
+warning: constant `IRQOVER_HIGH` is never used
+  --> io_bank0/src/main.rs:50:15
+   |
+50 |     pub const IRQOVER_HIGH: u32 = 0x3 << IRQOVER_SHIFT;
+   |               ^^^^^^^^^^^^
+
+warning: constant `JPEG_1024x768` should have an upper case name
+   --> camera/src/main.rs:976:7
+    |
+976 | const JPEG_1024x768: [(I2CReg, u8); 36] = [
+    |       ^^^^^^^^^^^^^
+    |
+help: convert the identifier to upper case (notice the capitalization)
+    |
+976 - const JPEG_1024x768: [(I2CReg, u8); 36] = [
+976 + const JPEG_1024X768: [(I2CReg, u8); 36] = [
+    |
+
+warning: constant `JPEG_1280x1024` should have an upper case name
+    --> camera/src/main.rs:1015:7
+     |
+1015 | const JPEG_1280x1024: [(I2CReg, u8); 38] = [
+     |       ^^^^^^^^^^^^^^
+     |
+help: convert the identifier to upper case (notice the capitalization)
+     |
+1015 - const JPEG_1280x1024: [(I2CReg, u8); 38] = [
+1015 + const JPEG_1280X1024: [(I2CReg, u8); 38] = [
+     |
+
+warning: constant `JPEG_1600x1200` should have an upper case name
+    --> camera/src/main.rs:1056:7
+     |
+1056 | const JPEG_1600x1200: [(I2CReg, u8); 38] = [
+     |       ^^^^^^^^^^^^^^
+     |
+help: convert the identifier to upper case (notice the capitalization)
+     |
+1056 - const JPEG_1600x1200: [(I2CReg, u8); 38] = [
+1056 + const JPEG_1600X1200: [(I2CReg, u8); 38] = [
+     |
+
+For more information about this error, try `rustc --explain E0433`.
+warning: `kernel` (bin "kernel") generated 8 warnings
+error: could not compile `kernel` (bin "kernel") due to 6 previous errors; 8 warnings emitted
+warning: build failed, waiting for other jobs to finish...
+warning: `sio` (bin "sio") generated 1 warning
+warning: `camera` (bin "camera") generated 51 warnings (run `cargo fix --bin "camera" -p camera` to apply 9 suggestions)
+warning: `pads_bank0` (bin "pads_bank0") generated 4 warnings
+warning: `io_bank0` (bin "io_bank0") generated 17 warnings (run `cargo fix --bin "io_bank0" -p io_bank0` to apply 1 suggestion)
+warning: `i2c` (bin "i2c") generated 86 warnings
+warning: `uart` (bin "uart") generated 36 warnings (run `cargo fix --bin "uart" -p uart` to apply 1 suggestion)
+warning: `tester` (bin "tester") generated 2 warnings (run `cargo fix --bin "tester" -p tester` to apply 1 suggestion)

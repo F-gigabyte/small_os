@@ -1,7 +1,14 @@
+// use core intrinsics 
+#![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test::test_runner)]
+
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
-use small_os_lib::{HeaderError, QueueError, WakeSrc, check_critical, check_header_len, clear_irq, notify_reply_empty, notify_send, read_header, receive, reply, reply_empty, send_empty, wait_irq, wait_queues_irq};
+use small_os_lib::{HeaderError, QueueError, WakeSrc, args, check_critical, check_header_len, clear_irq, notify_reply_empty, notify_send, read_header, receive, reply, reply_empty, send_empty, wait_irq, wait_queues_irq};
 use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, WriteOnly}};
@@ -15,6 +22,8 @@ mod armed_register {
     pub const ARMED2: u32 = 1 << (ARMED_SHIFT + 1);
     pub const ARMED3: u32 = 1 << (ARMED_SHIFT + 2);
     pub const ARMED4: u32 = 1 << (ARMED_SHIFT + 3);
+
+    pub const VALID_MASK: u32 = ARMED_MASK;
 }
 
 mod debug_pause_register {
@@ -23,6 +32,9 @@ mod debug_pause_register {
 
     pub const DEBUG0_MASK: u32 = 1 << DEBUG0_SHIFT;
     pub const DEBUG1_MASK: u32 = 1 << DEBUG1_SHIFT;
+
+    pub const VALID_MASK: u32 = DEBUG0_MASK |
+        DEBUG1_MASK;
 }
 
 mod interrupt_register {
@@ -36,7 +48,10 @@ mod interrupt_register {
     pub const ALARM2_MASK: u32 = 1 << ALARM2_SHIFT;
     pub const ALARM3_MASK: u32 = 1 << ALARM3_SHIFT;
 
-    pub const ALL_MASK: u32 = ALARM0_MASK | ALARM1_MASK | ALARM2_MASK | ALARM3_MASK;
+    pub const VALID_MASK: u32 = ALARM0_MASK | 
+        ALARM1_MASK | 
+        ALARM2_MASK | 
+        ALARM3_MASK;
 }
 
 struct TimerRegisters {
@@ -76,7 +91,7 @@ impl Timer {
                 notifiers: [false; 4]
             }
         };
-        field!(res.registers, debug_pause).write(0);
+        field!(res.registers, debug_pause).modify(|debug_pause| debug_pause & !debug_pause_register::VALID_MASK);
         res
     }
 
@@ -175,6 +190,13 @@ impl Timer {
             },
             _ => unreachable!()
         }
+    }
+
+    pub fn get_time(&mut self) -> u64 {
+        let mut res = 0;
+         res |= field!(self.registers, timelr).read() as u64;
+         res |= (field!(self.registers, timehr).read() as u64) << 32;
+         res
     }
 
     pub fn handle_irqs(&mut self, mut mask: u32) {
@@ -289,9 +311,13 @@ const RESET_QUEUE: u32 = 0;
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main(num_args: u32, timer_base: usize) {
-    assert!(num_args == 1);
+pub extern "C" fn main() {
+    let args = args();
+    assert_eq!(args.len(), 1);
     send_empty(RESET_QUEUE, 0, &[]).unwrap();
+    #[cfg(test)]
+    test_main();
+    let timer_base = args[0] as usize;
     let mut timer = unsafe {
         Timer::new(timer_base)
     };
@@ -345,5 +371,49 @@ pub extern "C" fn main(num_args: u32, timer_base: usize) {
                 panic!("Have unknown source {:?}", src);
             }
         }
+    }
+}
+
+/// Test framework which runs all the tests
+/// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+#[cfg(test)]
+mod test {
+    use small_os_lib::{kprint, kprintln};
+
+    use super::*;
+
+    pub fn test_runner(tests: &[&dyn Fn()]) {
+        kprintln!("Running {} tests for timer", tests.len());
+        for test in tests {
+            test();
+        }
+    }
+
+    #[test_case]
+    fn test_valid() {
+        kprintln!("Testing timer register mask values");
+        kprint!("Testing armed register ");
+        assert_eq!(armed_register::VALID_MASK, 0xf);
+        kprintln!("[ok]");
+        kprint!("Testing debug pause register ");
+        assert_eq!(debug_pause_register::VALID_MASK, 0x6);
+        kprintln!("[ok]");
+        kprint!("Testing interrupt register ");
+        assert_eq!(interrupt_register::VALID_MASK, 0xf);
+        kprintln!("[ok]");
+    }
+
+    #[test_case]
+    fn test_setup() {
+        let args = args();
+        let timer_base = args[0] as usize;
+        let mut timer = unsafe {
+            Timer::new(timer_base)
+        };
+        kprintln!("Testing timer setup");
+        kprint!("Testing debug pause register ");
+        let debug_pause = field!(timer.registers, debug_pause).read();
+        assert_eq!(debug_pause & debug_pause_register::VALID_MASK, 0);
+        kprintln!("[ok]");
     }
 }

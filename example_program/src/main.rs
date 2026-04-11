@@ -1,9 +1,16 @@
+// use core intrinsics 
+#![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test::test_runner)]
+
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
 use core::fmt::{self, Write};
 
-use small_os_lib::{kprintln, send, send_empty};
+use small_os_lib::{args, kprintln, send, send_empty};
 
 struct UARTPrint {}
 
@@ -59,8 +66,9 @@ const KERMIT_END_TRANSACTION_TAG: u16 = 4;
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main(num_args: usize) {
-    assert!(num_args == 0);
+pub extern "C" fn main() {
+    let args = args();
+    assert_eq!(args.len(), 0);
     /*send_empty(2, 4, &[16]).unwrap();
     send_empty(2, 4, &[17]).unwrap();
     send_empty(2, 4, &[18]).unwrap();
@@ -70,10 +78,12 @@ pub extern "C" fn main(num_args: usize) {
     send_empty(2, 1, &[18]).unwrap();
     send_empty(2, 1, &[19]).unwrap();
     */
-    send_empty(CAMERA_QUEUE, CAMERA_IMAGE_FORMAT_TAG, &[0]).unwrap();
+    send_empty(CAMERA_QUEUE, CAMERA_IMAGE_FORMAT_TAG, &[9]).unwrap();
     send_empty(CAMERA_QUEUE, CAMERA_CAPTURE_IMAGES_TAG, &[1]).unwrap();
     let mut prev_cap_done = false;
     let mut prev_len_zero = false;
+    #[cfg(test)]
+    test_main();
     loop {
         let mut temp_buffer = [2, 0];
         send(ADC_QUEUE, 0, &mut temp_buffer, 1, 2).unwrap();
@@ -119,6 +129,20 @@ pub extern "C" fn main(num_args: usize) {
                 send_empty(KERMIT_QUEUE, KERMIT_END_TRANSACTION_TAG, &[]).unwrap();
                 prev_len_zero = true;
             }
+        }
+    }
+}
+
+/// Test framework which runs all the tests
+/// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+#[cfg(test)]
+mod test {
+    use small_os_lib::kprintln;
+
+    pub fn test_runner(tests: &[&dyn Fn()]) {
+        kprintln!("Running {} tests for example program", tests.len());
+        for test in tests {
+            test();
         }
     }
 }

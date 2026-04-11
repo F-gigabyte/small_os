@@ -1,6 +1,6 @@
 use core::{cell::UnsafeCell, ptr, slice};
 
-use crate::{inter::{CS, IRQError}, message_queue::{AsyncMessageQueue, QueueError, SyncMessageQueue}, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, nvic::NVIC, proc::{Proc, ProcError, ProcState}, program::{__args, AccessAttr, Program}};
+use crate::{inter::{CS, IRQError, QueueIRQError}, message_queue::{AsyncMessageQueue, QueueError, SyncMessageQueue}, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, nvic::NVIC, proc::{Proc, ProcError, ProcState}, program::{__args, AccessAttr, Program}};
 
 // If this is changed, must change Proc struct
 const NUM_PRIORITIES: usize = 256;
@@ -56,23 +56,28 @@ impl Scheduler {
         }
         let proc = self.processes[pid as usize].get_mut();
         if proc.get_state() == ProcState::Free {
+            let has_inter = program.has_interrupt();
             let inter = program.inter;
-            for inter in inter {
-                let inter = inter as usize;
-                if inter < self.irq_events.len() {
-                    if !self.irq_events[inter].is_null() {
-                        return Err(ProcError::IRQTaken);
+            if has_inter {
+                for inter in inter {
+                    let inter = inter as usize;
+                    if inter < self.irq_events.len() {
+                        if !self.irq_events[inter].is_null() {
+                            return Err(ProcError::IRQTaken);
+                        }
                     }
                 }
             }
             unsafe {
                 proc.init(program, args)?;
             }
-            for inter in inter {
-                let inter = inter as usize;
-                if inter < self.irq_events.len() {
-                    self.irq_events[inter] = proc;
-                    
+            if has_inter {
+                for inter in inter {
+                    let inter = inter as usize;
+                    if inter < self.irq_events.len() {
+                        self.irq_events[inter] = proc;
+                        
+                    }
                 }
             }
             Ok(pid)
@@ -96,7 +101,7 @@ impl Scheduler {
     /// proc must not be accessed from `self.processes`
     /// proc must not be `self.current`
     unsafe fn schedule_internal<const LAST: bool>(&mut self, proc: *mut Proc) {
-        let proc = unsafe {
+        let mut proc = unsafe {
             &mut *proc
         };
         // Check proc is still alive and if not free it
@@ -110,7 +115,11 @@ impl Scheduler {
             };
             // higher priority process preempts a lower priority one
             if current.priority() < proc.priority() {
-                self.switch_out_current();
+                // swap current and proc since proc preempts current
+                current.set_state(ProcState::Scheduled);
+                proc.set_state(ProcState::Running);
+                self.current = proc;
+                proc = current;
             }
         }
         proc.set_state(ProcState::Scheduled);
@@ -261,35 +270,35 @@ impl Scheduler {
                 current.program = ptr::null_mut();
                 let program = &mut *program;
                 let driver = program.driver() as usize;
-                let mut args = [0; 6];
+                let mut args = [0; 7];
                 let kernel_args = &__args;
                 let mut arg_len = 0;
                 if driver != 0 {
-                    args[arg_len + 1] = program.regions[0].get_runtime_addr().unwrap();
+                    args[arg_len] = program.regions[0].get_runtime_addr().unwrap();
                     arg_len += 1;
                     if driver == 6 {
                         // IO Bank 0
-                        args[arg_len + 1] = kernel_args.pin_func[0];
-                        args[arg_len + 2] = kernel_args.pin_func[1];
-                        args[arg_len + 3] = kernel_args.pin_func[2];
-                        args[arg_len + 4] = kernel_args.pin_func[3];
+                        args[arg_len] = kernel_args.pin_func[0];
+                        args[arg_len + 1] = kernel_args.pin_func[1];
+                        args[arg_len + 2] = kernel_args.pin_func[2];
+                        args[arg_len + 3] = kernel_args.pin_func[3];
                         arg_len += 4;
                     } else if driver == 8 {
                         // Pads bank 0
-                        args[arg_len + 1] = kernel_args.pads[0];
-                        args[arg_len + 2] = kernel_args.pads[1];
+                        args[arg_len] = kernel_args.pads[0];
+                        args[arg_len + 1] = kernel_args.pads[1];
                         arg_len += 2;
                     } else if driver == 27 {
                         // Resets
-                        args[arg_len + 1] = kernel_args.resets;
+                        args[arg_len] = kernel_args.resets;
                         arg_len += 1;
                     }
                 }
                 if program.pin_mask != 0 {
-                    args[arg_len + 1] = program.pin_mask;
+                    args[arg_len] = program.pin_mask;
                     arg_len += 1;
                 }
-                args[0] = arg_len as u32;
+                args[arg_len] = arg_len as u32;
 
                 // reset region data
                 for region in &mut program.regions {
@@ -327,14 +336,11 @@ impl Scheduler {
             let program = unsafe {
                 & *current.program
             };
-            if !program.has_interrupt() {
-                return Err(IRQError::NoIRQ)
-            }
-            let mut nvic = NVIC.lock(&cs);
-            let irq_mask = Self::get_proc_irq_mask_clear(current, cs);
+            let irq_mask = Self::get_proc_irq_mask_clear(current, cs)?;
             if irq_mask != 0 {
                 _ = current.set_r0(irq_mask as u32);
             } else {
+                let mut nvic = NVIC.lock(&cs);
                 self.current = ptr::null_mut();
                 current.set_state(ProcState::BlockedIRQ);
                 // enable the IRQs for firing
@@ -387,7 +393,7 @@ impl Scheduler {
             let current = unsafe {
                 &mut *self.current
             };
-            Self::get_proc_irq_mask_clear(current, cs);
+            Self::get_proc_irq_mask_clear(current, cs)?;
         }
         Ok(())
     }
@@ -491,7 +497,9 @@ impl Scheduler {
                 let notifier = unsafe {
                     &mut *program.notifiers.add(notifier as usize)
                 };
-                notifier.put(queue.take()?);
+                unsafe {
+                    notifier.put(queue.take()?);
+                }
                 Ok(())
             } else {
                 Err(QueueError::InvalidNotifer(notifier))
@@ -518,13 +526,7 @@ impl Scheduler {
             let data = unsafe {
                 slice::from_raw_parts(data, len as usize)
             };
-            let header = MessageHeader {
-                pid: current.get_pid(),
-                pin_mask: current.get_pin_mask(),
-                driver_tag: ((current.get_driver() as u32) << 16) | (tag & 0xffff),
-                len
-            };
-            queue.send(header, data)?;
+            queue.send(&current, (tag & 0xffff) as u16, data)?;
             if !queue.blocked.is_null() {
                 let proc = unsafe {
                     &mut *queue.blocked
@@ -579,22 +581,31 @@ impl Scheduler {
         Ok(())
     }
 
-    fn get_proc_irq_mask_clear(proc: &mut Proc, cs: &CS) -> u8 {
+    fn get_proc_irq_mask_clear(proc: &mut Proc, cs: &CS) -> Result<u8, IRQError> {
         let mut nvic = NVIC.lock(cs);
         let program = unsafe {
             & *proc.program
         };
         let pending = nvic.get_pending();
         let mut mask = proc.get_irq_mask();
-        for (i, inter) in program.interrupts().iter().enumerate() {
-            if *inter < 32 && pending & (1 << *inter) != 0 {
-                mask |= 1 << i;
-                nvic.clear_pending_irq(*inter);
+        let mut has_inter = false;
+        if program.driver() != 0 {
+            for (i, inter) in program.interrupts().iter().enumerate() {
+                if *inter < 32 {
+                    has_inter = true;
+                    if pending & (1 << *inter) != 0 {
+                        mask |= 1 << i;
+                        nvic.clear_pending_irq(*inter);
+                    }
+                }
             }
         }
-        let pending = nvic.get_pending();
         proc.clear_irqs();
-        mask
+        if has_inter {
+            Ok(mask)
+        } else {
+            Err(IRQError::NoIRQ)
+        }
     }
 
     pub fn header(&mut self, queue: u32, block: bool) -> Result<(), QueueError> {
@@ -677,21 +688,24 @@ impl Scheduler {
         }
     }
 
-    pub fn wait_queues(&mut self, queue_mask: u32, irq: bool, cs: &CS) -> Result<(), QueueError> {
+    pub fn wait_queues(&mut self, queue_mask: u32, irq: bool, cs: &CS) -> Result<(), QueueIRQError> {
         let current = unsafe {
             &mut *self.current
         };
         let program = unsafe {
             & *current.program
         };
+        if queue_mask == 0 {
+            return Err(QueueIRQError::QueueError(QueueError::NoQueueMask));
+        }
+        if program.num_sync_queues() == 0 {
+            return Err(QueueIRQError::QueueError(QueueError::InvalidQueue(0)));
+        }
         let sync_queues = unsafe {
             slice::from_raw_parts_mut(program.sync_queues, program.num_sync_queues() as usize)
         };
-        if queue_mask == 0 {
-            return Err(QueueError::NoQueueMask);
-        }
         if irq {
-            let irq_mask = Self::get_proc_irq_mask_clear(current, cs);
+            let irq_mask = Self::get_proc_irq_mask_clear(current, cs)?;
             if irq_mask != 0 {
                 _ = current.set_r0(1);
                 _ = current.set_r1(irq_mask as u32);
@@ -702,7 +716,7 @@ impl Scheduler {
         let mut mask = queue_mask;
         while mask != 0 {
             if index >= sync_queues.len() {
-                return Err(QueueError::InvalidQueue(index as u32));
+                return Err(QueueIRQError::QueueError(QueueError::InvalidQueue(index as u32)));
             }
             if mask & 1 != 0 {
                 if !sync_queues[index].is_empty() {
@@ -743,22 +757,24 @@ impl Scheduler {
         Ok(())
     }
 
-    pub fn wait_queues_async(&mut self, queue_mask: u32, irq: bool, cs: &CS) -> Result<(), QueueError> {
+    pub fn wait_queues_async(&mut self, queue_mask: u32, irq: bool, cs: &CS) -> Result<(), QueueIRQError> {
         let current = unsafe {
             &mut *self.current
         };
         let program = unsafe {
             & *current.program
         };
+        if queue_mask == 0 {
+            return Err(QueueIRQError::QueueError(QueueError::NoQueueMask));
+        }
+        if program.num_async_queues() == 0 {
+            return Err(QueueIRQError::QueueError(QueueError::InvalidQueue(0)));
+        }
         let async_queues = unsafe {
             slice::from_raw_parts_mut(program.async_queues, program.num_async_queues() as usize)
         };
-        if queue_mask == 0 {
-            _ = current.set_r0(0);
-            return Ok(());
-        }
         if irq {
-            let irq_mask = Self::get_proc_irq_mask_clear(current, cs);
+            let irq_mask = Self::get_proc_irq_mask_clear(current, cs)?;
             if irq_mask != 0 {
                 _ = current.set_r0(1);
                 _ = current.set_r1(irq_mask as u32);
@@ -770,7 +786,7 @@ impl Scheduler {
         while mask != 0 {
             if mask & 1 != 0 {
                 if index >= async_queues.len() {
-                    return Err(QueueError::InvalidQueue(index as u32));
+                    return Err(QueueIRQError::QueueError(QueueError::InvalidQueue(index as u32)));
                 }
                 if !async_queues[index].is_empty() {
                     if irq {
@@ -810,7 +826,7 @@ impl Scheduler {
         Ok(())
     }
 
-    unsafe fn sync_receive_message_internal(&mut self, current: &mut Proc, queue: &mut SyncMessageQueue, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
+    fn sync_receive_message_internal(&mut self, current: &mut Proc, queue: &mut SyncMessageQueue, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
         let data = queue.read_data(len as usize)?;
         let len = data.len();
         // check access is valid
@@ -819,9 +835,7 @@ impl Scheduler {
         Ok(())
     }
 
-    /// SAFETY
-    /// `data` points to a buffer of length `len` 
-    pub unsafe fn receive_message(&mut self, queue: u32, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
+    pub fn receive_message(&mut self, queue: u32, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
         };
@@ -832,17 +846,13 @@ impl Scheduler {
             let queue = unsafe {
                 &mut *program.sync_queues.add(queue as usize)
             };
-            unsafe {
-                self.sync_receive_message_internal(current, queue, len, buffer)
-            }
+            self.sync_receive_message_internal(current, queue, len, buffer)
         } else {
             Err(QueueError::InvalidQueue(queue))
         }
     }
 
-    /// SAFETY
-    /// `data` points to a buffer of length `len` 
-    pub unsafe fn notify_receive_message(&mut self, notifier: u32, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
+    pub fn notify_receive_message(&mut self, notifier: u32, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
         };
@@ -851,20 +861,16 @@ impl Scheduler {
         };
         if notifier < program.num_notifier_queues() {
             let notifier = unsafe {
-                &mut *program.sync_queues.add(notifier as usize)
+                &mut *program.notifiers.add(notifier as usize)
             };
-            unsafe {
-                self.sync_receive_message_internal(current, notifier, len, buffer)
-            }
+            self.sync_receive_message_internal(current, notifier, len, buffer)
         } else {
             Err(QueueError::InvalidQueue(notifier))
         }
     }
 
     
-    /// SAFETY
-    /// `data` points to a buffer of length `len` 
-    pub unsafe fn receive_message_async(&mut self, queue: u32, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
+    pub fn receive_message_async(&mut self, queue: u32, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
         };
@@ -1051,73 +1057,595 @@ pub unsafe fn update_codes(proc: *mut Proc) -> *mut Proc {
 
 #[cfg(test)]
 mod test {
+    use core::mem::{self, MaybeUninit};
+
     use crate::{print, println};
 
     use super::*;
-        
+
     static mut PROCS: [UnsafeCell<Proc>; 10] = [const { UnsafeCell::new(Proc::new()) }; 10];
+    static mut SCHEDULER: Scheduler = Scheduler::new();
+
+    unsafe fn reset_procs() {
+        for i in 0..unsafe { (* &raw const PROCS).len() } {
+            let proc = unsafe {
+                &mut *((&raw mut PROCS) as *mut Proc).add(i)
+            };
+            *proc = Proc::new();
+        }
+    }
+
+    unsafe fn reset_scheduler() -> &'static mut Scheduler {
+        unsafe {
+            reset_procs();
+        }
+        let scheduler = unsafe {
+            &mut * &raw mut SCHEDULER
+        };
+        for proc in scheduler.start_proc.iter_mut() {
+            *proc = ptr::null_mut();
+        }
+        for proc in scheduler.end_proc.iter_mut() {
+            *proc = ptr::null_mut();
+        }
+        for proc in scheduler.irq_events.iter_mut() {
+            *proc = ptr::null_mut();
+        }
+        scheduler.current = ptr::null_mut();
+        unsafe {
+            scheduler.init(&mut * &raw mut PROCS);
+        }
+        scheduler
+    }
 
     #[test_case]
     fn test_priority() {
         println!("Testing scheduler priority");
-        let mut scheduler = unsafe {
-            Scheduler::new(&mut * &raw mut PROCS)
+        let scheduler = unsafe {
+            reset_scheduler()
         };
-        let mut stack = [0; 8 * 10];
+        let mut stack: [u32; _] = [0; 64 * 10];
+        let stack_addr = stack.as_mut_ptr() as u32;
         for i in 0..4 {
+            let prog = unsafe {
+                Program::get_test_prog(i)
+            };
+            prog.pid = i as u32;
+            prog.regions[0].virt_addr = stack_addr + 256 * i as u32;
+            prog.regions[0].actual_len = 256;
+            prog.regions[0].len = 0x70023;
+            prog.flags = 1;
             unsafe {
-                let pid = scheduler.create_proc(i as u32, 0, stack.as_mut_ptr().add(8 * i + 8) as u32, 1 as u8, None, None, None, None).unwrap();
+                let pid = scheduler.create_proc(prog, &[]).unwrap();
                 scheduler.schedule_process(pid).unwrap();
             }
         }
         for i in 4..9 {
+            let prog = unsafe {
+                Program::get_test_prog(i)
+            };
+            prog.pid = i as u32;
+            prog.regions[0].virt_addr = stack_addr + 256 * i as u32;
+            prog.regions[0].actual_len = 256;
+            prog.regions[0].len = 0x70023;
+            prog.flags = i as u32;
             unsafe {
-                let pid = scheduler.create_proc(i as u32, 0, stack.as_mut_ptr().add(8 * i + 8) as u32, i as u8, None, None, None, None).unwrap();
+                let pid = scheduler.create_proc(prog, &[]).unwrap();
                 scheduler.schedule_process(pid).unwrap();
             }
         }
         print!("Testing round robin ");
         scheduler.next_process();
         unsafe {
-            assert_eq!((*scheduler.current).pid, 0);
+            assert_eq!((*scheduler.current).get_pid(), 0);
         }
         scheduler.yield_current();
         scheduler.next_process();
         unsafe {
-            assert_eq!((*scheduler.current).pid, 1);
+            assert_eq!((*scheduler.current).get_pid(), 1);
         }
         scheduler.yield_current();
         scheduler.next_process();
         unsafe {
-            assert_eq!((*scheduler.current).pid, 2);
+            assert_eq!((*scheduler.current).get_pid(), 2);
         }
         scheduler.yield_current();
         scheduler.next_process();
         unsafe {
-            assert_eq!((*scheduler.current).pid, 3);
+            assert_eq!((*scheduler.current).get_pid(), 3);
         }
         scheduler.yield_current();
         scheduler.next_process();
         unsafe {
-            assert_eq!((*scheduler.current).pid, 0);
+            assert_eq!((*scheduler.current).get_pid(), 0);
         }
         println!("[ok]");
         print!("Testing preemptive high priority task ");
-        unsafe {
-            let pid = scheduler.create_proc(9, 0, stack.as_mut_ptr().add(80) as u32, 0, None, None, None, None).unwrap();
-            scheduler.schedule_process(pid).unwrap();
+        {
+            let prog = unsafe {
+                Program::get_test_prog(9)
+            };
+            prog.pid = 9;
+            prog.regions[0].virt_addr = stack_addr + 256 * 9;
+            prog.regions[0].actual_len = 256;
+            prog.regions[0].len = 0x70023;
+            unsafe {
+                let pid = scheduler.create_proc(prog, &[]).unwrap();
+                scheduler.schedule_process(pid).unwrap();
+            }
         }
         scheduler.next_process();
         unsafe {
-            assert_eq!((*scheduler.current).pid, 9);
+            assert_eq!((*scheduler.current).get_pid(), 9);
         }
         println!("[ok]");
         print!("Testing terminating current ");
         scheduler.terminate_current();
         scheduler.next_process();
         unsafe {
-            assert_eq!((*scheduler.current).pid, 1);
+            assert_eq!((*scheduler.current).get_pid(), 1);
         }
         println!("[ok]");
+    }
+
+    #[test_case]
+    fn test_schedule_irq() {
+        println!("Testing scheduling around IRQ");
+        let scheduler = unsafe {
+            reset_scheduler()
+        };
+        let prog = unsafe {
+            Program::get_test_prog(0)
+        };
+        let cs = unsafe {
+            CS::new()
+        };
+        let mut stack: [u32; _] = [0; 64];
+        let stack_addr = stack.as_mut_ptr() as u32;
+        prog.pid = 1;
+        prog.regions[0].virt_addr = stack_addr;
+        prog.regions[0].actual_len = 256;
+        prog.regions[0].len = 0x70023;
+        prog.flags = 0x10001;
+        prog.inter[0] = 5;
+        let pid = unsafe {
+            scheduler.create_proc(prog, &[]).unwrap()
+        };
+        scheduler.schedule_process(pid).unwrap();
+        print!("Testing proc runnable no irq ");
+        scheduler.next_current_process();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), 1);
+        }
+        println!("[ok]");
+        print!("Testing sleep IRQ ");
+        scheduler.sleep_irq(&cs).unwrap();
+        assert!(scheduler.current.is_null());
+        println!("[ok]");
+        print!("Testing wake IRQ ");
+        scheduler.wake(5, &cs);
+        scheduler.next_current_process();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), 1);
+            assert_eq!((*scheduler.current).get_r0().unwrap(), 1);
+            assert_eq!((*scheduler.current).get_r12().unwrap(), 0);
+        }
+        println!("[ok]");
+        print!("Testing clear IRQ ");
+        unsafe {
+            (*scheduler.current).mask_in_irq(5);
+            assert_eq!((*scheduler.current).get_irq_mask(), 1);
+        }
+        scheduler.clear_irq(&cs).unwrap();
+        unsafe {
+            assert_eq!((*scheduler.current).get_irq_mask(), 0);
+        }
+        println!("[ok]");
+    }
+
+    #[test_case]
+    fn test_sync_queue() {
+        println!("Testing scheduling with synchronous queues");
+        let scheduler = unsafe {
+            reset_scheduler()
+        };
+        let prog0 = unsafe {
+            Program::get_test_prog(0)
+        };
+        let prog1 = unsafe {
+            Program::get_test_prog(1)
+        };
+        let mut queue = unsafe {
+            SyncMessageQueue::new()
+        };
+        let cs = unsafe {
+            CS::new()
+        };
+        let endpoint: *mut SyncMessageQueue = &mut queue;
+        let mut stack: [u32; _] = [0; 64 * 2];
+        stack[2] = 120;
+        stack[3] = 240;
+        stack[64] = 10;
+        stack[65] = 12;
+        let stack = stack.as_mut_ptr();
+        let stack_addr = stack as u32;
+        prog0.pid = 0;
+        prog0.sync_queues = &mut queue;
+        prog0.num_queues = 0x1;
+        prog0.regions[0].virt_addr = stack_addr; 
+        prog0.regions[0].actual_len = 256;
+        prog0.regions[0].len = 0x70023;
+        prog1.pid = 1;
+        prog1.sync_endpoints = &endpoint;
+        prog1.num_sync_endpoints = 1;
+        prog1.regions[0].virt_addr = stack_addr + 256; 
+        prog1.regions[0].actual_len = 256;
+        prog1.regions[0].len = 0x70023;
+        let proc0 = unsafe {
+            scheduler.create_proc(prog0, &[]).unwrap()
+        };
+        let proc1 = unsafe {
+            scheduler.create_proc(prog1, &[]).unwrap()
+        };
+        scheduler.schedule_process(proc1).unwrap();
+        scheduler.schedule_process(proc0).unwrap();
+        scheduler.next_process();
+        print!("Testing proc1 is first ");
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc1);
+        }
+        println!("[ok]");
+        print!("Testing send ");
+        let (r0, r1, r2, r3) = unsafe {
+            (*scheduler.current).set_r0(0).unwrap();
+            (*scheduler.current).set_r1(1).unwrap();
+            (*scheduler.current).set_r2((2 * 4) | ((2 * 4) << 16)).unwrap();
+            (*scheduler.current).set_r3(stack_addr + 256).unwrap();
+            ((*scheduler.current).get_r0().unwrap(), (*scheduler.current).get_r1().unwrap(), (*scheduler.current).get_r2().unwrap(), (*scheduler.current).get_r3().unwrap())
+        };
+        scheduler.send(r0, r1, r2, ptr::with_exposed_provenance_mut(r3 as usize)).unwrap();
+        scheduler.next_current_process();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc0);
+        }
+        println!("[ok]");
+        print!("Testing wait queues ");
+        scheduler.wait_queues(1, false, &cs).unwrap();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc0);
+            assert_eq!((*scheduler.current).get_r12().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r0().unwrap(), 0);
+        }
+        println!("[ok]");
+        print!("Testing header ");
+        scheduler.header(0, true).unwrap();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc0);
+            assert_eq!((*scheduler.current).get_r12().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r0().unwrap(), proc1);
+            assert_eq!((*scheduler.current).get_r1().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r2().unwrap(), 1);
+            assert_eq!((*scheduler.current).get_r3().unwrap(), (2 * 4) | ((2 * 4) << 16));
+        }
+        println!("[ok]");
+        print!("Testing receive ");
+        scheduler.receive_message(0, 2 * 4, ptr::with_exposed_provenance_mut(stack_addr as usize)).unwrap();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc0);
+            assert_eq!((*scheduler.current).get_r12().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r0().unwrap(), 2 * 4);
+            assert_eq!(stack.add(0).read(), 10);
+            assert_eq!(stack.add(1).read(), 12);
+        }
+        println!("[ok]");
+        print!("Testing reply ");
+        scheduler.reply(0, 67, 2 * 4, ptr::with_exposed_provenance_mut(stack_addr as usize + 2 * 4)).unwrap();
+        scheduler.next_process();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc1);
+            assert_eq!((*scheduler.current).get_r12().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r0().unwrap(), 67);
+            assert_eq!(stack.add(64).read(), 120);
+            assert_eq!(stack.add(65).read(), 240);
+        }
+        println!("[ok]");
+    }
+
+    #[test_case]
+    fn test_notifier_queue() {
+        println!("Testing scheduling with notifier queues");
+        let scheduler = unsafe {
+            reset_scheduler()
+        };
+        let prog0 = unsafe {
+            Program::get_test_prog(0)
+        };
+        let prog1 = unsafe {
+            Program::get_test_prog(1)
+        };
+        let mut queue = unsafe {
+            SyncMessageQueue::new()
+        };
+        let mut notifier = unsafe {
+            SyncMessageQueue::new()
+        };
+        let endpoint: *mut SyncMessageQueue = &mut queue;
+        let mut stack: [u32; _] = [0; 64 * 2];
+        stack[2] = 120;
+        stack[3] = 240;
+        stack[64] = 10;
+        stack[65] = 12;
+        let stack = stack.as_mut_ptr();
+        let stack_addr = stack as u32;
+        prog0.pid = 0;
+        prog0.sync_queues = &mut queue;
+        prog0.num_queues = 0x10001;
+        prog0.notifiers = &mut notifier;
+        prog0.regions[0].virt_addr = stack_addr; 
+        prog0.regions[0].actual_len = 256;
+        prog0.regions[0].len = 0x70023;
+        prog1.pid = 1;
+        prog1.sync_endpoints = &endpoint;
+        prog1.num_sync_endpoints = 1;
+        prog1.regions[0].virt_addr = stack_addr + 256; 
+        prog1.regions[0].actual_len = 256;
+        prog1.regions[0].len = 0x70023;
+        let proc0 = unsafe {
+            scheduler.create_proc(prog0, &[]).unwrap()
+        };
+        let proc1 = unsafe {
+            scheduler.create_proc(prog1, &[]).unwrap()
+        };
+        scheduler.schedule_process(proc1).unwrap();
+        scheduler.schedule_process(proc0).unwrap();
+        scheduler.next_process();
+        print!("Testing proc1 is first ");
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc1);
+        }
+        println!("[ok]");
+        print!("Testing send ");
+        let (r0, r1, r2, r3) = unsafe {
+            (*scheduler.current).set_r0(0).unwrap();
+            (*scheduler.current).set_r1(1).unwrap();
+            (*scheduler.current).set_r2((2 * 4) | ((2 * 4) << 16)).unwrap();
+            (*scheduler.current).set_r3(stack_addr + 256).unwrap();
+            ((*scheduler.current).get_r0().unwrap(), (*scheduler.current).get_r1().unwrap(), (*scheduler.current).get_r2().unwrap(), (*scheduler.current).get_r3().unwrap())
+        };
+        scheduler.send(r0, r1, r2, ptr::with_exposed_provenance_mut(r3 as usize)).unwrap();
+        scheduler.next_current_process();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc0);
+        }
+        println!("[ok]");
+        print!("Testing notify send ");
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc0);
+        }
+        scheduler.notify_send(0, 0).unwrap();
+        println!("[ok]");
+        print!("Testing notify header ");
+        scheduler.notify_header(0).unwrap();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc0);
+            assert_eq!((*scheduler.current).get_r12().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r0().unwrap(), proc1);
+            assert_eq!((*scheduler.current).get_r1().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r2().unwrap(), 1);
+            assert_eq!((*scheduler.current).get_r3().unwrap(), (2 * 4) | ((2 * 4) << 16));
+        }
+        println!("[ok]");
+        print!("Testing notify receive ");
+        scheduler.notify_receive_message(0, 2 * 4, ptr::with_exposed_provenance_mut(stack_addr as usize)).unwrap();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc0);
+            assert_eq!((*scheduler.current).get_r12().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r0().unwrap(), 2 * 4);
+            assert_eq!(stack.add(0).read(), 10);
+            assert_eq!(stack.add(1).read(), 12);
+        }
+        println!("[ok]");
+        print!("Testing notify reply ");
+        scheduler.notify_reply(0, 67, 2 * 4, ptr::with_exposed_provenance_mut(stack_addr as usize + 2 * 4)).unwrap();
+        scheduler.next_process();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc1);
+            assert_eq!((*scheduler.current).get_r12().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r0().unwrap(), 67);
+            assert_eq!(stack.add(64).read(), 120);
+            assert_eq!(stack.add(65).read(), 240);
+        }
+        println!("[ok]");
+    }
+
+    #[test_case]
+    fn test_async_queue() {
+        println!("Testing scheduling with asynchronous queues");
+        let scheduler = unsafe {
+            reset_scheduler()
+        };
+        let prog0 = unsafe {
+            Program::get_test_prog(0)
+        };
+        let prog1 = unsafe {
+            Program::get_test_prog(1)
+        };
+        let cs = unsafe {
+            CS::new()
+        };
+        struct Message {
+            _header: MessageHeader,
+            _data: [u8; 200]
+        }
+        static mut MESSAGES: [MaybeUninit<Message>; 10] = [const { MaybeUninit::uninit() }; 10];
+        let mut queue = unsafe {
+            AsyncMessageQueue::new(&raw mut MESSAGES as *mut MessageHeader, 10, mem::size_of::<Message>() as u32)
+        };
+        let endpoint: *mut AsyncMessageQueue = &mut queue;
+        let mut stack: [u32; _] = [0; 64 * 2];
+        stack[2] = 120;
+        stack[3] = 240;
+        stack[64] = 10;
+        stack[65] = 12;
+        let stack = stack.as_mut_ptr();
+        let stack_addr = stack as u32;
+        prog0.pid = 0;
+        prog0.async_queues = &mut queue;
+        prog0.num_queues = 0x100;
+        prog0.regions[0].virt_addr = stack_addr; 
+        prog0.regions[0].actual_len = 256;
+        prog0.regions[0].len = 0x70023;
+        prog1.pid = 1;
+        prog1.async_endpoints = &endpoint;
+        prog1.num_async_endpoints = 1;
+        prog1.regions[0].virt_addr = stack_addr + 256; 
+        prog1.regions[0].actual_len = 256;
+        prog1.regions[0].len = 0x70023;
+        let proc0 = unsafe {
+            scheduler.create_proc(prog0, &[]).unwrap()
+        };
+        let proc1 = unsafe {
+            scheduler.create_proc(prog1, &[]).unwrap()
+        };
+        scheduler.schedule_process(proc1).unwrap();
+        scheduler.schedule_process(proc0).unwrap();
+        scheduler.next_process();
+        print!("Testing proc1 is first ");
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc1);
+        }
+        println!("[ok]");
+        print!("Testing send async ");
+        unsafe {
+            scheduler.send_async(0, 1, 2 * 4, ptr::with_exposed_provenance_mut(stack_addr as usize + 256)).unwrap();
+        }
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc1);
+        }
+        scheduler.next_process();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc0);
+        }
+        println!("[ok]");
+        print!("Testing wait queues async ");
+        scheduler.wait_queues_async(1, false, &cs).unwrap();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc0);
+            assert_eq!((*scheduler.current).get_r12().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r0().unwrap(), 0);
+        }
+        println!("[ok]");
+        print!("Testing header async ");
+        scheduler.header_async(0, true).unwrap();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc0);
+            assert_eq!((*scheduler.current).get_r12().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r0().unwrap(), proc1);
+            assert_eq!((*scheduler.current).get_r1().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r2().unwrap(), 1);
+            assert_eq!((*scheduler.current).get_r3().unwrap(), 2 * 4);
+        }
+        println!("[ok]");
+        print!("Testing receive async ");
+        scheduler.receive_message_async(0, 2 * 4, ptr::with_exposed_provenance_mut(stack_addr as usize)).unwrap();
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), proc0);
+            assert_eq!((*scheduler.current).get_r12().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r0().unwrap(), 2 * 4);
+            assert_eq!(stack.add(0).read(), 10);
+            assert_eq!(stack.add(1).read(), 12);
+        }
+        println!("[ok]");
+    }
+
+    #[test_case]
+    fn test_reset_current() {
+        let scheduler = unsafe {
+            reset_scheduler()
+        };
+        let mut stack: [u32; _] = [0; 64];
+        let stack_addr = stack.as_mut_ptr() as u32;
+        let prog = unsafe {
+            Program::get_test_prog(0)
+        };
+        prog.pid = 1;
+        prog.regions[0].virt_addr = stack_addr;
+        prog.regions[0].actual_len = 256;
+        prog.regions[0].len = 0x70023;
+        prog.flags = 1;
+        prog.entry = 0x9000;
+        unsafe {
+            let pid = scheduler.create_proc(prog, &[]).unwrap();
+            scheduler.schedule_process(pid).unwrap();
+        }
+        scheduler.next_process();
+        println!("Testing reset current process");
+        unsafe {
+            assert_eq!((*scheduler.current).get_pid(), 1);
+            (*scheduler.current).set_r0(20).unwrap();
+            (*scheduler.current).set_r1(20).unwrap();
+            (*scheduler.current).set_r2(20).unwrap();
+            (*scheduler.current).set_r3(20).unwrap();
+            (*scheduler.current).r4 = 20;
+            (*scheduler.current).r5 = 20;
+            (*scheduler.current).r6 = 20;
+            (*scheduler.current).r7 = 20;
+            (*scheduler.current).r8 = 20;
+            (*scheduler.current).r9 = 20;
+            (*scheduler.current).r10 = 20;
+            (*scheduler.current).r11 = 20;
+            (*scheduler.current).set_r12(20).unwrap();
+            (*scheduler.current).set_lr(0x1000).unwrap();
+        }
+        print!("Testing reset current ");
+        scheduler.reset_current();
+        scheduler.next_process();
+        unsafe {
+            assert_eq!((*scheduler.current).get_r0().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r1().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r2().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_r3().unwrap(), 0);
+            assert_eq!((*scheduler.current).r4, 0);
+            assert_eq!((*scheduler.current).r5, 0);
+            assert_eq!((*scheduler.current).r6, 0);
+            assert_eq!((*scheduler.current).r7, 0);
+            assert_eq!((*scheduler.current).r8, 0);
+            assert_eq!((*scheduler.current).r9, 0);
+            assert_eq!((*scheduler.current).r10, 0);
+            assert_eq!((*scheduler.current).r11, 0);
+            assert_eq!((*scheduler.current).get_r12().unwrap(), 0);
+            assert_eq!((*scheduler.current).get_lr().unwrap(), 0x9000);
+        }
+        println!("[ok]");
+    }
+
+    #[test_case]
+    fn test_update_codes() {
+        let scheduler = unsafe {
+            reset_scheduler()
+        };
+        let mut stack: [u32; _] = [0; 64];
+        let stack_addr = stack.as_mut_ptr() as u32;
+        let prog = unsafe {
+            Program::get_test_prog(0)
+        };
+        prog.pid = 1;
+        prog.regions[0].virt_addr = stack_addr;
+        prog.regions[0].actual_len = 256;
+        prog.regions[0].len = 0x70023;
+        prog.flags = 1;
+        prog.entry = 0x9000;
+        unsafe {
+            let pid = scheduler.create_proc(prog, &[]).unwrap();
+            scheduler.schedule_process(pid).unwrap();
+        }
+        scheduler.next_current_process();
+        println!("Testing update current process codes");
+        print!("Testing update codes ");
+        scheduler.update_current_codes();
+        unsafe {
+            (*scheduler.current).correct_errors().unwrap()
+        };
+        println!("[ok]")
     }
 }

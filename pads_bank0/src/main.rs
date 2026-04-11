@@ -1,18 +1,16 @@
+// use core intrinsics 
+#![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test::test_runner)]
+
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
 use core::ptr;
 
-use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, read_header, receive, reply_empty, send_empty};
-
-mod voltage_register {
-    pub const VOLTAGE_SHIFT: usize = 0;
-
-    pub const VOLTAGE_MASK: u32 = 1 << VOLTAGE_SHIFT;
-
-    pub const VOLTAGE_3V3: u32 = 0 << VOLTAGE_MASK;
-    pub const VOLTAGE_1V8: u32 = 1 << VOLTAGE_MASK;
-}
+use small_os_lib::{HeaderError, QueueError, args, check_critical, check_header_len, read_header, receive, reply_empty, send_empty};
 
 mod gpio_register {
     pub const SLEWFAST_SHIFT: usize = 0;
@@ -35,6 +33,14 @@ mod gpio_register {
     pub const DRIVE_4MA: u32 = 0x1 << DRIVE_SHIFT;
     pub const DRIVE_8MA: u32 = 0x2 << DRIVE_SHIFT;
     pub const DRIVE_12MA: u32 = 0x3 << DRIVE_SHIFT;
+
+    pub const VALID_MASK: u32 = SLEWFAST_MASK |
+        SCHMITT_MASK |
+        PULL_DOWN_ENABLE_MASK |
+        PULL_UP_ENABLE_MASK |
+        DRIVE_MASK |
+        INPUT_ENABLE_MASK |
+        OUTPUT_DISABLE_MASK;
 }
 
 pub enum PadsBank0ReplyError {
@@ -95,7 +101,7 @@ impl From<HeaderError> for PadsBank0Error {
 
 pub struct PadsBank0 {
     registers: *mut u32,
-    pads: [u32; 2]
+    pads: &'static [u32]
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -159,10 +165,10 @@ impl TryFrom<u8> for GPIOState {
 }
 
 impl PadsBank0 {
-    unsafe fn new(base: usize, pads0: u32, pads1: u32) -> Self {
+    unsafe fn new(base: usize, pads: &'static [u32]) -> Self {
         let mut res = Self {
             registers: ptr::with_exposed_provenance_mut(base),
-            pads: [pads0, pads1]
+            pads
         };
         for i in 0..30 {
             res.reset_gpio(i as u8);
@@ -192,7 +198,12 @@ impl PadsBank0 {
         let pad_ptr = unsafe {
             self.registers.add((gpio as usize) + 1)
         };
-        let val = gpio_register::DRIVE_4MA | 
+        let val = unsafe {
+            pad_ptr.read_volatile()
+        };
+        let val = 
+            (val & !gpio_register::VALID_MASK) |
+            gpio_register::DRIVE_4MA | 
             gpio_register::PULL_DOWN_ENABLE_MASK | 
             gpio_register::INPUT_ENABLE_MASK |
             gpio_register::SCHMITT_MASK;
@@ -206,7 +217,11 @@ impl PadsBank0 {
         let pad_ptr = unsafe {
             self.registers.add((gpio as usize) + 1)
         };
-        let val = gpio_register::DRIVE_4MA | 
+        let val = unsafe {
+            pad_ptr.read_volatile()
+        };
+        let val = (val & !gpio_register::VALID_MASK) |
+            gpio_register::DRIVE_4MA | 
             gpio_register::PULL_DOWN_ENABLE_MASK | 
             gpio_register::OUTPUT_DISABLE_MASK |
             gpio_register::SCHMITT_MASK;
@@ -220,7 +235,11 @@ impl PadsBank0 {
         let pad_ptr = unsafe {
             self.registers.add((gpio as usize) + 1)
         };
-        let val = gpio_register::DRIVE_4MA | 
+        let val = unsafe {
+            pad_ptr.read_volatile()
+        };
+        let val = (val & !gpio_register::VALID_MASK) |
+            gpio_register::DRIVE_4MA | 
             gpio_register::PULL_UP_ENABLE_MASK | 
             gpio_register::INPUT_ENABLE_MASK |
             gpio_register::SCHMITT_MASK;
@@ -234,7 +253,10 @@ impl PadsBank0 {
         let pad_ptr = unsafe {
             self.registers.add((gpio as usize) + 1)
         };
-        let val = 0; 
+        let val = unsafe {
+            pad_ptr.read_volatile()
+        };
+        let val = val & !gpio_register::VALID_MASK; 
         unsafe {
             pad_ptr.write_volatile(val);
         }
@@ -246,12 +268,17 @@ const RESET_QUEUE: u32 = 0;
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main(num_args: usize, pads_base: usize, pads0: u32, pads1: u32) {
-    assert!(num_args == 3);
+pub extern "C" fn main() {
+    let args = args();
+    assert_eq!(args.len(), 3);
+    let pads_base = args[0] as usize;
+    let pads = &args[1..];
     // check reset is done
     send_empty(RESET_QUEUE, 0, &[]).unwrap();
+    #[cfg(test)]
+    test_main();
     let mut pads = unsafe {
-        PadsBank0::new(pads_base, pads0, pads1)
+        PadsBank0::new(pads_base, pads)
     };
     loop {
         match Request::parse() {
@@ -280,6 +307,70 @@ pub extern "C" fn main(num_args: usize, pads_base: usize, pads0: u32, pads1: u32
                     }
                 }
             }
+        }
+    }
+}
+
+/// Test framework which runs all the tests
+/// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+#[cfg(test)]
+mod test {
+    use small_os_lib::{kprint, kprintln};
+
+    use super::*;
+
+    pub fn test_runner(tests: &[&dyn Fn()]) {
+        kprintln!("Running {} tests for pads bank 0", tests.len());
+        for test in tests {
+            test();
+        }
+    }
+
+    #[test_case]
+    fn test_valid() {
+        kprintln!("Testing pads bank 0 register mask values");
+        kprint!("Testing gpio ctrl register ");
+        assert_eq!(gpio_register::VALID_MASK, 0xff);
+        kprintln!("[ok]")
+    }
+
+    #[test_case]
+    fn test_setup() {
+        let args = args();
+        let base = args[0] as usize;
+        let pads = &args[1..];
+        let pads_bank0 = unsafe {
+            PadsBank0::new(base, pads)
+        };
+        kprintln!("Testing pads bank 0 setup");
+        for i in 0..30 {
+            kprint!("Testing gpio register {} ", i);
+            let index = (i / 16) as usize;
+            let shift = (i % 16) * 2;
+            let state = (pads_bank0.pads[index] >> shift) & 0x3;
+            let pad = unsafe {
+                pads_bank0.registers.add((i as usize) + 1).read()
+            };
+            match state {
+                0 => {
+                    // disable
+                    assert_eq!(pad & gpio_register::VALID_MASK, 0);
+                },
+                1 => {
+                    // normal
+                    assert_eq!(pad & gpio_register::VALID_MASK, 0x56);
+                },
+                2 => {
+                    // analog
+                    assert_eq!(pad & gpio_register::VALID_MASK, 0x96);
+                },
+                3 => {
+                    // pull up
+                    assert_eq!(pad & gpio_register::VALID_MASK, 0x5a);
+                },
+                _ => unreachable!()
+            }
+            kprintln!("[ok]");
         }
     }
 }

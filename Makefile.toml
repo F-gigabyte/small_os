@@ -1,0 +1,118 @@
+[env]
+LD = "arm-none-eabi-ld"
+OBJCOPY = "arm-none-eabi-objcopy"
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+
+[tasks.openocd]
+private = true
+workspace = false
+ignore_errors = true # if session already running, will fail
+command = "openocd&"
+
+[tasks.build]
+private = true
+command = "cargo"
+args = ["build"]
+
+[tasks.build_release]
+private = true
+command = "cargo"
+args = ["build", "-r"]
+
+[tasks.build_test]
+private = true
+command = "cargo"
+args = ["test", "--no-run"]
+
+[tasks.build_test_release]
+private = true
+command = "cargo"
+args = ["test", "-r", "--no-run"]
+
+[tasks.pkg]
+private = true
+workspace = false
+command = "pkg"
+args = ["small_os.toml", "-o", "target/thumbv6m-none-eabi/debug/small_os"]
+dependencies = [
+    "build",
+]
+
+[tasks.pkg_release]
+private = true
+workspace = false
+command = "pkg"
+args = ["-t", "small_os.toml", "-o", "target/thumbv6m-none-eabi/release/small_os"]
+dependencies = [
+    "build_release",
+]
+
+[tasks.pkg_test]
+private = true
+workspace = false
+command = "pkg"
+args = ["-t", "small_os.toml", "-o", "target/thumbv6m-none-eabi/debug/small_os"]
+dependencies = [
+    "build_test",
+]
+
+[tasks.pkg_test_release]
+private = true
+workspace = false
+command = "pkg"
+args = ["small_os.toml", "-o", "target/thumbv6m-none-eabi/release/small_os"]
+dependencies = [
+    "build_test_release",
+]
+
+[tasks.debug_impl]
+private = true
+workspace = false
+command = "gdb"
+args = ["-x", "openocd.gdb", "target/thumbv6m-none-eabi/debug/small_os"]
+dependencies = [
+    "openocd"
+]
+
+[tasks.debug]
+run_task = { name = "debug_impl", fork = true}
+
+[tasks.debug_release_impl]
+private = true
+workspace = false
+command = "gdb"
+args = ["-x", "openocd.gdb", "target/thumbv6m-none-eabi/release/small_os"]
+dependencies = [
+    "openocd"
+]
+
+[tasks.debug_release]
+run_task = { name = "debug_release_impl", fork = true}
+
+[tasks.run]
+workspace = false
+dependencies = [
+    "pkg",
+    "debug"
+]
+
+[tasks.run_release]
+workspace = false
+dependencies = [
+    "pkg_release",
+    "debug_release"
+]
+
+[tasks.test]
+workspace = false
+dependencies = [
+    "pkg_test",
+    "debug"
+]
+
+[tasks.test_release]
+workspace = false
+dependencies = [
+    "pkg_test_release",
+    "debug_release"
+]

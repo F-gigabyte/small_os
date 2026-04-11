@@ -1,0 +1,185 @@
+async_message_len = 128
+debug_path = "target/thumbv6m-none-eabi/debug"
+release_path = "target/thumbv6m-none-eabi/release"
+
+[kernel]
+exec = "kernel"
+
+[[programs]]
+name = "example_program"
+exec = "example_program"
+priority = 3
+num_sync_queues = 0
+async_queues = []
+sync_endpoints = [{ name = "uart", queue = 0 }, { name = "adc", queue = 0 }, { name = "camera", queue = 0 }, { name = "kermit", queue = 0 }]
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "uart"
+exec = "uart"
+priority = 3
+driver = "UART0"
+pins = [0, 1, 2, 3]
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "io_bank0", queue = 0 }]
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "reset"
+exec = "reset"
+priority = 3
+driver = "Subsystem Reset"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = []
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "io_bank0"
+exec = "io_bank0"
+priority = 3
+driver = "IO Bank0"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "reset", queue = 0 }, { name = "pads_bank0", queue = 0 }]
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "pads_bank0"
+exec = "pads_bank0"
+priority = 3
+driver = "IO Bank0 Pads"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "reset", queue = 0 }]
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "adc"
+exec = "adc"
+priority = 3
+driver = "ADC"
+pins = [28]
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "io_bank0", queue = 0 }]
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+#[[programs]]
+#name = "sio"
+#exec = "sio"
+#priority = 3
+#driver = "SIO Proc 0"
+#pins = [16, 17, 18, 19]
+#num_sync_queues = 1
+#async_queues = []
+#sync_endpoints = [{ name = "io_bank0", queue = 0 }]
+#async_endpoints = []
+#num_notifiers = 0
+#block_len = 247
+
+[[programs]]
+name = "spi"
+exec = "spi"
+priority = 3
+driver = "SPI0"
+pins = [16, 17, 18, 19]
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "io_bank0", queue = 0 }]
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "camera"
+exec = "camera"
+priority = 3
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "spi", queue = 0 }, { name = "i2c", queue = 0 }, { name = "timer", queue = 0 }]
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "i2c"
+exec = "i2c"
+priority = 3
+driver = "I2C0"
+pins = [20, 21]
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "io_bank0", queue = 0 }]
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "timer"
+exec = "timer"
+priority = 3
+driver = "Timer"
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "reset", queue = 0 }]
+async_endpoints = []
+num_notifiers = 4
+block_len = 247
+
+[[programs]]
+name = "kermit"
+exec = "kermit"
+priority = 3
+num_sync_queues = 1
+async_queues = []
+sync_endpoints = [{ name = "uart", queue = 0 }]
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "tester"
+exec = "tester"
+priority = 3
+num_sync_queues = 0
+async_queues = []
+sync_endpoints = []
+async_endpoints = []
+num_notifiers = 0
+block_len = 247
+
+[[programs]]
+name = "test_a"
+exec = "test_a"
+priority = 3
+num_sync_queues = 1
+async_queues = [5]
+sync_endpoints = [{ name = "test_b", queue = 0 }]
+async_endpoints = [{ name = "test_b", queue = 0 }]
+num_notifiers = 1
+block_len = 247
+
+[[programs]]
+name = "test_b"
+exec = "test_b"
+priority = 3
+num_sync_queues = 1
+async_queues = [5]
+sync_endpoints = [{ name = "test_a", queue = 0 }]
+async_endpoints = [{ name = "test_a", queue = 0 }]
+num_notifiers = 1
+block_len = 247

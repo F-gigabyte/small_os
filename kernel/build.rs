@@ -34,6 +34,18 @@ fn main() {
     println!("cargo::rustc-link-arg=-Tkernel.ld");
     println!("cargo::rustc-link-arg=-r");
     let mut builder = cc::Build::new();
+    if cfg!(feature = "error_codes") {
+        builder.define("ERROR_CODES", None);
+    }
+    if cfg!(feature = "benchmark") {
+        builder.define("BENCHMARK", None);
+    }
+    if cfg!(feature = "random") {
+        builder.define("RANDOM", None);
+    }
+    if cfg!(feature = "radiation") {
+        builder.define("RADIATION", None);
+    }
     let start_dir = Path::new("src");
     // set default compiler to clang as its by default a cross compiler while gcc would need to be
     // recompiled for armv6m

@@ -1,10 +1,17 @@
+// use core intrinsics 
+#![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test::test_runner)]
+
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
 use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, WriteOnly}};
-use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, read_header, receive, reply, reply_empty, send_empty};
+use small_os_lib::{HeaderError, QueueError, args, check_critical, check_header_len, read_header, receive, reply, reply_empty, send_empty};
 
 #[repr(C)]
 struct SIORegisters {
@@ -228,8 +235,11 @@ const IO_BANK0_QUEUE: u32 = 0;
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main(num_args: usize, sio_base: usize, bitmap: u32) {
-    assert!(num_args == 2);
+pub extern "C" fn main() {
+    let args = args();
+    assert_eq!(args.len(), 2);
+    let sio_base = args[0] as usize;
+    let bitmap = args[1];
     // wait for func select to be set
     send_empty(IO_BANK0_QUEUE, 0, &[]).unwrap();
     let mut sio = unsafe {
@@ -279,6 +289,20 @@ pub extern "C" fn main(num_args: usize, sio_base: usize, bitmap: u32) {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Test framework which runs all the tests
+/// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+#[cfg(test)]
+mod test {
+    use small_os_lib::kprintln;
+
+    pub fn test_runner(tests: &[&dyn Fn()]) {
+        kprintln!("Running {} tests for SIO", tests.len());
+        for test in tests {
+            test();
         }
     }
 }

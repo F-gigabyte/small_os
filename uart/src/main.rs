@@ -1,10 +1,17 @@
+// use core intrinsics 
+#![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test::test_runner)]
+
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
 use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, ReadWrite, WriteOnly}};
-use small_os_lib::{HeaderError, QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, check_header_len, clear_irq, do_yield, kprintln, read_header, receive, reply, reply_empty, send, send_empty, wait_irq};
+use small_os_lib::{HeaderError, QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, args, check_critical, check_header_len, clear_irq, do_yield, kprintln, read_header, receive, reply, reply_empty, send, send_empty, wait_irq};
 
 #[repr(C)]
 struct UARTRegisters {
@@ -41,6 +48,12 @@ mod data_register {
     pub const PARITY_ERROR_MASK: u32 = 1 << PARITY_ERROR_SHIFT;
     pub const BREAK_ERROR_MASK: u32 = 1 << BREAK_ERROR_SHIFT;
     pub const OVERRUN_ERROR_MASK: u32 = 1 << OVERRUN_ERROR_SHIFT;
+
+    pub const VALID_MASK: u32 = DATA_MASK |
+        FRAMING_ERROR_MASK |
+        PARITY_ERROR_MASK |
+        BREAK_ERROR_MASK |
+        OVERRUN_ERROR_MASK;
 }
 
 /// Fields in UART status register
@@ -54,6 +67,11 @@ mod receive_status_register {
     pub const PARITY_ERROR_MASK: u32 = 1 << PARITY_ERROR_SHIFT;
     pub const BREAK_ERROR_MASK: u32 = 1 << BREAK_ERROR_SHIFT;
     pub const OVERRUN_ERROR_MASK: u32 = 1 << OVERRUN_ERROR_SHIFT;
+
+    pub const VALID_MASK: u32 = FRAMING_ERROR_MASK |
+        PARITY_ERROR_MASK |
+        BREAK_ERROR_MASK |
+        OVERRUN_ERROR_MASK;
 }
 
 mod flag_register {
@@ -76,18 +94,32 @@ mod flag_register {
     pub const RXFF_MASK: u32 = 1 << RXFF_SHIFT;
     pub const TXFE_MASK: u32 = 1 << TXFE_SHIFT;
     pub const RI_MASK: u32 = 1 << RI_SHIFT;
+
+    pub const VALID_MASK: u32 = CTS_MASK |
+        DSR_MASK |
+        DCD_MASK |
+        BUSY_MASK |
+        RXFE_MASK |
+        TXFF_MASK |
+        RXFF_MASK |
+        TXFE_MASK |
+        RI_MASK;
 }
 
 mod int_baud_rate_register {
     pub const BAUD_DIVINT_SHIFT: usize = 0;
     
     pub const BAUD_DIVINT_MASK: u32 = 0xffff << BAUD_DIVINT_SHIFT;
+
+    pub const VALID_MASK: u32 = BAUD_DIVINT_MASK;
 }
 
 mod frac_baud_rate_register {
     pub const BAUD_DIVFRAC_SHIFT: usize = 0;
     
     pub const BAUD_DIVFRAC_MASK: u32 = 0x3f << BAUD_DIVFRAC_SHIFT;
+
+    pub const VALID_MASK: u32 = BAUD_DIVFRAC_MASK;
 }
 
 mod line_ctrl_register {
@@ -104,13 +136,21 @@ mod line_ctrl_register {
     pub const EPS_MASK: u32 = 1 << EPS_SHIFT;
     pub const STP2_MASK: u32 = 1 << STP2_SHIFT;
     pub const FEN_MASK: u32 = 1 << FEN_SHIFT;
-    pub const WLEN_MASK: u32 = 1 << WLEN_SHIFT;
+    pub const WLEN_MASK: u32 = 0x3 << WLEN_SHIFT;
     pub const SPS_MASK: u32 = 1 << SPS_SHIFT;
 
     pub const WLEN_5: u32 = 0b00 << WLEN_SHIFT;
     pub const WLEN_6: u32 = 0b01 << WLEN_SHIFT;
     pub const WLEN_7: u32 = 0b10 << WLEN_SHIFT;
     pub const WLEN_8: u32 = 0b11 << WLEN_SHIFT;
+
+    pub const VALID_MASK: u32 = BRK_MASK |
+        PEN_MASK |
+        EPS_MASK |
+        STP2_MASK |
+        FEN_MASK |
+        WLEN_MASK |
+        SPS_MASK;
 }
 
 mod ctrl_register {
@@ -139,6 +179,19 @@ mod ctrl_register {
     pub const OUT2_MASK: u32 = 1 << OUT2_SHIFT;
     pub const RTSEN_MASK: u32 = 1 << RTSEN_SHIFT;
     pub const CTSEN_MASK: u32 = 1 << CTSEN_SHIFT;
+
+    pub const VALID_MASK: u32 = UARTEN_MASK |
+        SIREN_MASK |
+        SIRLP_MASK |
+        LBE_MASK |
+        TXE_MASK |
+        RXE_MASK |
+        DTR_MASK |
+        RTS_MASK |
+        OUT1_MASK |
+        OUT2_MASK |
+        RTSEN_MASK |
+        CTSEN_MASK;
 }
 
 mod interrupt_register {
@@ -166,7 +219,7 @@ mod interrupt_register {
     pub const BE_MASK: u32 = 1 << BE_SHIFT;
     pub const OE_MASK: u32 = 1 << OE_SHIFT;
 
-    pub const ALL_MASK: u32 = 
+    pub const VALID_MASK: u32 = 
         RI_MASK | 
         CTS_MASK |
         DCD_MASK |
@@ -198,6 +251,9 @@ mod inter_fifo_sel_register {
     pub const RX_FIFO_4: u32 = 0x2 << RX_FIFO_SHIFT;
     pub const RX_FIFO_6: u32 = 0x3 << RX_FIFO_SHIFT;
     pub const RX_FIFO_7: u32 = 0x4 << RX_FIFO_SHIFT;
+
+    pub const VALID_MASK: u32 = TX_FIFO_MASK |
+        RX_FIFO_MASK;
 }
 
 struct UART {
@@ -220,46 +276,81 @@ impl UART {
         while field!(res.registers, flag).read() & flag_register::BUSY_MASK != 0 {
             do_yield().unwrap();
         }
-        field!(res.registers, ctrl).write(0);
+        field!(res.registers, ctrl).modify(|ctrl| ctrl & !ctrl_register::VALID_MASK);
         // clear all interrupts
-        field!(res.registers, inter_clr).write(interrupt_register::ALL_MASK);
+        field!(res.registers, inter_clr).write(interrupt_register::VALID_MASK);
 
         // set baud rate to 115200
         // integer baud rate should be 6 and fractional should be 33 for a 12MHz clock
         //field!(res.registers, int_baud).write((6 << int_baud_rate_register::BAUD_DIVINT_SHIFT) & int_baud_rate_register::BAUD_DIVINT_MASK);
         //field!(res.registers, frac_baud).write((33 << frac_baud_rate_register::BAUD_DIVFRAC_SHIFT) & frac_baud_rate_register::BAUD_DIVFRAC_MASK);
-        field!(res.registers, int_baud).write((26 << int_baud_rate_register::BAUD_DIVINT_SHIFT) & int_baud_rate_register::BAUD_DIVINT_MASK);
-        field!(res.registers, frac_baud).write((3 << frac_baud_rate_register::BAUD_DIVFRAC_SHIFT) & frac_baud_rate_register::BAUD_DIVFRAC_MASK);
-        field!(res.registers, line_ctrl).write(line_ctrl_register::FEN_MASK | line_ctrl_register::WLEN_8);
+        field!(res.registers, int_baud).modify(|int_baud|
+            (int_baud & !int_baud_rate_register::VALID_MASK) |
+            (26 << int_baud_rate_register::BAUD_DIVINT_SHIFT)
+            );
+        field!(res.registers, frac_baud).modify(|frac_baud|
+            (frac_baud & !frac_baud_rate_register::VALID_MASK) |
+            (3 << frac_baud_rate_register::BAUD_DIVFRAC_SHIFT)
+        );
+        field!(res.registers, line_ctrl).modify(|line_ctrl|
+            (line_ctrl & !line_ctrl_register::VALID_MASK) |
+            line_ctrl_register::FEN_MASK | 
+            line_ctrl_register::WLEN_8
+        );
         // mask all interrupts (no interrupts will be generated)
-        field!(res.clear_reg, mask_set_clr).write(interrupt_register::ALL_MASK);
+        field!(res.clear_reg, mask_set_clr).modify(|inter_mask|
+            (inter_mask & !interrupt_register::VALID_MASK) |
+            interrupt_register::VALID_MASK
+        );
         // interrupt when tx fifo <= 1/8 full
-        field!(res.registers, inter_fifo_sel).write(inter_fifo_sel_register::TX_FIFO_1);
+        field!(res.registers, inter_fifo_sel).modify(|inter_fifo_sel|
+            (inter_fifo_sel & !inter_fifo_sel_register::VALID_MASK) |
+            inter_fifo_sel_register::TX_FIFO_1
+        );
         // enable UART, RX and TX section
-        field!(res.registers, ctrl).write(ctrl_register::TXE_MASK | ctrl_register::RXE_MASK | ctrl_register::UARTEN_MASK);
-        // in release builds, if this is not there garbage is printed to the screen
+        field!(res.registers, ctrl).modify(|ctrl|
+            (ctrl & !ctrl_register::VALID_MASK) |
+            ctrl_register::TXE_MASK | 
+            ctrl_register::RXE_MASK | 
+            ctrl_register::UARTEN_MASK
+        );
         res
     }
 
     fn wait_for_space_tx(&mut self, len: usize) -> bool {
         if len >= (7 * Self::SLOTS) / 8 {
-            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::TX_FIFO_1);
+            field!(self.registers, inter_fifo_sel).modify(|inter_fifo_sel|
+                (inter_fifo_sel & !inter_fifo_sel_register::VALID_MASK) |
+                inter_fifo_sel_register::TX_FIFO_1
+            );
             field!(self.set_reg, mask_set_clr).write(interrupt_register::TX_MASK);
             true
         } else if len >= (3 * Self::SLOTS) / 4 {
-            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::TX_FIFO_2);
+            field!(self.registers, inter_fifo_sel).modify(|inter_fifo_sel|
+                (inter_fifo_sel & !inter_fifo_sel_register::VALID_MASK) |
+                inter_fifo_sel_register::TX_FIFO_2
+            );
             field!(self.set_reg, mask_set_clr).write(interrupt_register::TX_MASK);
             true
         } else if len >= Self::SLOTS / 2 {
-            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::TX_FIFO_4);
+            field!(self.registers, inter_fifo_sel).modify(|inter_fifo_sel|
+                (inter_fifo_sel & !inter_fifo_sel_register::VALID_MASK) |
+                inter_fifo_sel_register::TX_FIFO_4
+            );
             field!(self.set_reg, mask_set_clr).write(interrupt_register::TX_MASK);
             true
         } else if len >= Self::SLOTS / 4 {
-            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::TX_FIFO_6);
+            field!(self.registers, inter_fifo_sel).modify(|inter_fifo_sel|
+                (inter_fifo_sel & !inter_fifo_sel_register::VALID_MASK) |
+                inter_fifo_sel_register::TX_FIFO_6
+            );
             field!(self.set_reg, mask_set_clr).write(interrupt_register::TX_MASK);
             true
         } else if len >= Self::SLOTS / 8 {
-            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::TX_FIFO_7);
+            field!(self.registers, inter_fifo_sel).modify(|inter_fifo_sel|
+                (inter_fifo_sel & !inter_fifo_sel_register::VALID_MASK) |
+                inter_fifo_sel_register::TX_FIFO_7
+            );
             field!(self.set_reg, mask_set_clr).write(interrupt_register::TX_MASK);
             true
         } else {
@@ -269,23 +360,38 @@ impl UART {
     
     fn wait_for_space_rx(&mut self, len: usize) -> bool {
         if len >= (7 * Self::SLOTS) / 8 {
-            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::RX_FIFO_7);
+            field!(self.registers, inter_fifo_sel).modify(|inter_fifo_sel|
+                (inter_fifo_sel & !inter_fifo_sel_register::VALID_MASK) |
+                inter_fifo_sel_register::RX_FIFO_7
+            );
             field!(self.set_reg, mask_set_clr).write(interrupt_register::RX_MASK);
             true
         } else if len >= (3 * Self::SLOTS) / 4 {
-            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::RX_FIFO_6);
+            field!(self.registers, inter_fifo_sel).modify(|inter_fifo_sel|
+                (inter_fifo_sel & !inter_fifo_sel_register::VALID_MASK) |
+                inter_fifo_sel_register::RX_FIFO_6
+            );
             field!(self.set_reg, mask_set_clr).write(interrupt_register::RX_MASK);
             true
         } else if len >= Self::SLOTS / 2 {
-            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::RX_FIFO_4);
+            field!(self.registers, inter_fifo_sel).modify(|inter_fifo_sel|
+                (inter_fifo_sel & !inter_fifo_sel_register::VALID_MASK) |
+                inter_fifo_sel_register::RX_FIFO_4
+            );
             field!(self.set_reg, mask_set_clr).write(interrupt_register::RX_MASK);
             true
         } else if len >= Self::SLOTS / 4 {
-            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::RX_FIFO_2);
+            field!(self.registers, inter_fifo_sel).modify(|inter_fifo_sel|
+                (inter_fifo_sel & !inter_fifo_sel_register::VALID_MASK) |
+                inter_fifo_sel_register::RX_FIFO_2
+            );
             field!(self.set_reg, mask_set_clr).write(interrupt_register::RX_MASK);
             true
         } else if len >= Self::SLOTS / 8 {
-            field!(self.registers, inter_fifo_sel).write(inter_fifo_sel_register::RX_FIFO_1);
+            field!(self.registers, inter_fifo_sel).modify(|inter_fifo_sel|
+                (inter_fifo_sel & !inter_fifo_sel_register::VALID_MASK) |
+                inter_fifo_sel_register::RX_FIFO_1
+            );
             field!(self.set_reg, mask_set_clr).write(interrupt_register::RX_MASK);
             true
         } else {
@@ -301,10 +407,6 @@ impl UART {
         field!(self.registers, flag).read() & flag_register::RXFE_MASK != 0
     }
 
-    const fn min_wait_len() -> usize {
-        Self::SLOTS / 8
-    }
-
     pub fn handle_receive(&mut self, buffer: &mut [u8]) {
         let mut pos = 0;
         while pos < buffer.len() && self.wait_for_space_rx(buffer.len() - pos) {
@@ -312,13 +414,13 @@ impl UART {
             field!(self.clear_reg, mask_set_clr).write(interrupt_register::RX_MASK);
             field!(self.set_reg, inter_clr).write(interrupt_register::RX_MASK);
             while !self.rx_empty() && pos < buffer.len() {
-                buffer[pos] = (field!(self.registers, data).read() & 0xff) as u8;
+                buffer[pos] = ((field!(self.registers, data).read() & data_register::DATA_MASK) >> data_register::DATA_SHIFT) as u8;
                 pos += 1;
             }
         }
         while pos < buffer.len() {
             while self.rx_empty() {}
-            buffer[pos] = (field!(self.registers, data).read() & 0xff) as u8;
+            buffer[pos] = ((field!(self.registers, data).read() & data_register::DATA_MASK) >> data_register::DATA_SHIFT) as u8;
             pos += 1;
         }
     }
@@ -488,13 +590,17 @@ const IO_BANK0_QUEUE: u32 = 0;
 /// Disables mangling so it can be called from assembly
 /// Also has argument for GPIO mask but the driver doesn't care about this
 #[unsafe(no_mangle)]
-pub extern "C" fn main(num_args: usize, uart_base: usize) {
-    assert!(num_args == 2);
+pub extern "C" fn main() {
+    let args = args();
+    assert_eq!(args.len(), 2);
+    let uart_base = args[0] as usize;
     // check func sel has finished
     send_empty(IO_BANK0_QUEUE, 0, &[]).unwrap();
     let mut uart = unsafe {
         UART::new(uart_base)
     };
+    #[cfg(test)]
+    test_main();
     loop {
         match Request::parse() {
             Ok(request) => {
@@ -536,5 +642,79 @@ pub extern "C" fn main(num_args: usize, uart_base: usize) {
                 }
             }
         }
+    }
+}
+
+/// Test framework which runs all the tests
+/// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+#[cfg(test)]
+mod test {
+    use small_os_lib::{kprint, kprintln};
+
+    use super::*;
+
+    pub fn test_runner(tests: &[&dyn Fn()]) {
+        kprintln!("Running {} tests for UART", tests.len());
+        for test in tests {
+            test();
+        }
+    }
+
+    #[test_case]
+    fn test_valid() {
+        kprintln!("Testing UART register mask values");
+        kprint!("Testing data register ");
+        assert_eq!(data_register::VALID_MASK, 0xfff);
+        kprintln!("[ok]");
+        kprint!("Testing receive status register ");
+        assert_eq!(receive_status_register::VALID_MASK, 0xf);
+        kprintln!("[ok]");
+        kprint!("Testing flag register ");
+        assert_eq!(flag_register::VALID_MASK, 0x1ff);
+        kprintln!("[ok]");
+        kprint!("Testing int baud rate register ");
+        assert_eq!(int_baud_rate_register::VALID_MASK, 0xffff);
+        kprintln!("[ok]");
+        kprint!("Testing frac baud rate register ");
+        assert_eq!(frac_baud_rate_register::VALID_MASK, 0x3f);
+        kprintln!("[ok]");
+        kprint!("Testing line ctrl register ");
+        assert_eq!(line_ctrl_register::VALID_MASK, 0xff);
+        kprintln!("[ok]");
+        kprint!("Testing ctrl register ");
+        assert_eq!(ctrl_register::VALID_MASK, 0xff87);
+        kprintln!("[ok]");
+        kprint!("Testing interrupt register ");
+        assert_eq!(interrupt_register::VALID_MASK, 0x7ff);
+        kprintln!("[ok]");
+    }
+
+    #[test_case]
+    fn test_setup() {
+        let args = args();
+        let uart_base = args[0] as usize;
+        let mut uart = unsafe {
+            UART::new(uart_base)
+        };
+        kprint!("Testing int baud register ");
+        let int_baud = field!(uart.registers, int_baud).read();
+        assert_eq!(int_baud & int_baud_rate_register::VALID_MASK, 26);
+        kprintln!("[ok]");
+        kprint!("Testing frac baud register ");
+        let frac_baud = field!(uart.registers, frac_baud).read();
+        assert_eq!(frac_baud & frac_baud_rate_register::VALID_MASK, 3);
+        kprintln!("[ok]");
+        kprint!("Testing line ctrl register ");
+        let line_ctrl = field!(uart.registers, line_ctrl).read();
+        assert_eq!(line_ctrl & line_ctrl_register::VALID_MASK, 0x70);
+        kprintln!("[ok]");
+        kprint!("Testing ctrl register ");
+        let ctrl = field!(uart.registers, ctrl).read();
+        assert_eq!(ctrl & ctrl_register::VALID_MASK, 0x301);
+        kprintln!("[ok]");
+        kprint!("Testing mask set clr register ");
+        let mask = field!(uart.registers, mask_set_clr).read();
+        assert_eq!(mask & interrupt_register::VALID_MASK, 0);
+        kprintln!("[ok]");
     }
 }

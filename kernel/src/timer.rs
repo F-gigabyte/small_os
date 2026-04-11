@@ -1,154 +1,98 @@
-use core::ptr::{self, NonNull};
+use core::ptr;
 
-use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, WriteOnly}};
+use crate::{println, proc::Proc};
 
-use crate::{mmio::{REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS}, mutex::SpinIRQ, println};
+static mut PREVIOUS_TIME: u64 = 0;
+static mut MAX_TIME: u64 = 0;
 
-struct TimerRegisters {
-    timehw: WriteOnly<u32>, // 0x0
-    timelw: WriteOnly<u32>, // 0x4
-    timehr: ReadPure<u32>, // 0x8
-    timelr: ReadPure<u32>, // 0xc
-    alarm0: ReadPureWrite<u32>, // 0x10
-    alarm1: ReadPureWrite<u32>, // 0x14
-    alarm2: ReadPureWrite<u32>, // 0x18
-    alarm3: ReadPureWrite<u32>, // 0x1c
-    armed: ReadPureWrite<u32>, // 0x20
-    timerawh: ReadPure<u32>, // 0x24
-    timerawl: ReadPure<u32>, // 0x28
-    debug_pause: ReadPureWrite<u32>, // 0x2c
-    pause: ReadPureWrite<u32>, // 0x30
-    int_raw: ReadPureWrite<u32>, // 0x34
-    int_enable: ReadPureWrite<u32>, // 0x38
-    int_force: ReadPureWrite<u32>, // 0x3c
-    int_status: ReadPure<u32> // 0x40
-}
+#[cfg(feature = "radiation")]
+static mut ITERATION: u64 = 0;
 
-mod armed_register {
-    pub const ARMED_SHIFT: usize = 0;
-
-    pub const ARMED_MASK: u32 = 0xf << ARMED_SHIFT;
-
-    pub const ARMED1: u32 = 1 << ARMED_SHIFT;
-    pub const ARMED2: u32 = 1 << (ARMED_SHIFT + 1);
-    pub const ARMED3: u32 = 1 << (ARMED_SHIFT + 2);
-    pub const ARMED4: u32 = 1 << (ARMED_SHIFT + 3);
-}
-
-mod debug_pause_register {
-    pub const DEBUG0_SHIFT: usize = 1;
-    pub const DEBUG1_SHIFT: usize = 2;
-
-    pub const DEBUG0_MASK: u32 = 1 << DEBUG0_SHIFT;
-    pub const DEBUG1_MASK: u32 = 1 << DEBUG1_SHIFT;
-}
-
-mod interrupt_register {
-    pub const ALARM0_SHIFT: usize = 0;
-    pub const ALARM1_SHIFT: usize = 1;
-    pub const ALARM2_SHIFT: usize = 2;
-    pub const ALARM3_SHIFT: usize = 3;
-
-    pub const ALARM0_MASK: u32 = 1 << ALARM0_SHIFT;
-    pub const ALARM1_MASK: u32 = 1 << ALARM1_SHIFT;
-    pub const ALARM2_MASK: u32 = 1 << ALARM2_SHIFT;
-    pub const ALARM3_MASK: u32 = 1 << ALARM3_SHIFT;
-
-    pub const ALL_MASK: u32 = ALARM0_MASK | ALARM1_MASK | ALARM2_MASK | ALARM3_MASK;
-}
-
-pub struct Timer {
-    registers: UniqueMmioPointer<'static, TimerRegisters>,
-    set_reg: UniqueMmioPointer<'static, TimerRegisters>,
-    clear_reg: UniqueMmioPointer<'static, TimerRegisters>,
-}
-
-#[derive(Clone, Copy)]
-pub enum TimerIRQ {
-    Timer0 = 0,
-    Timer1 = 1,
-    Timer2 = 2,
-    Timer3 = 3
-}
-
-impl Timer {
-    const unsafe fn new(base: usize) -> Self {
-        unsafe {
-            Self {
-                registers: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base)).unwrap()),
-                set_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_SET_BITS)).unwrap()),
-                clear_reg: UniqueMmioPointer::new(NonNull::new(ptr::with_exposed_provenance_mut(base + REG_ALIAS_CLR_BITS)).unwrap()),
-            }
+pub fn read_time() -> u64 {
+    let ptr: *const u32 = ptr::with_exposed_provenance(0x40054000);
+    loop {
+        let upper = unsafe {
+            ptr.add(9).read_volatile()
+        };
+        let lower = unsafe {
+            ptr.add(10).read_volatile()
+        };
+        let upper2 = unsafe {
+            ptr.add(9).read_volatile()
+        };
+        if upper == upper2 {
+            return ((upper as u64) << 32) | (lower as u64);
         }
     }
+}
 
-    pub fn remove_debug_pause(&mut self) {
-        field!(self.registers, debug_pause).write(0);
+#[unsafe(no_mangle)]
+pub unsafe fn kernel_entry(proc: *mut Proc) -> *mut Proc {
+    unsafe {
+        (&raw mut PREVIOUS_TIME).write_volatile(read_time());
     }
+    proc
+}
 
-    pub fn read_time(&mut self) -> u64 {
-        let lower = field!(self.registers, timelr).read();
-        let upper = field!(self.registers, timehr).read();
-        (upper as u64) << 32 | (lower as u64)
-    }
+#[cfg(feature = "radiation")]
+#[unsafe(no_mangle)]
+pub unsafe fn do_radiation(proc: *mut Proc) -> *mut Proc {
+    use crate::rosc::ROSC;
 
-    #[inline(always)]
-    pub fn set_count0(&mut self, count: u32) {
-        // do this step so we lock the time registers in the middle
-        let lower = field!(self.registers, timelr).read();
-        let time = lower.wrapping_add(count);
-        field!(self.registers, alarm0).write(time);
-        field!(self.registers, timehr).read();
-    }
-    
-    #[inline(always)]
-    pub fn set_count1(&mut self, count: u32) {
-        // do this step so we lock the time registers in the middle
-        let lower = field!(self.registers, timelr).read();
-        let time = lower.wrapping_add(count);
-        field!(self.registers, alarm1).write(time);
-        field!(self.registers, timehr).read();
-    }
-    
-    #[inline(always)]
-    pub fn set_count2(&mut self, count: u32) {
-        // do this step so we lock the time registers in the middle
-        let lower = field!(self.registers, timelr).read();
-        let time = lower.wrapping_add(count);
-        field!(self.registers, alarm2).write(time);
-        field!(self.registers, timehr).read();
-    }
-    
-    #[inline(always)]
-    pub fn set_count3(&mut self, count: u32) {
-        // do this step so we lock the time registers in the middle
-        let lower = field!(self.registers, timelr).read();
-        let time = lower.wrapping_add(count);
-        field!(self.registers, alarm3).write(time);
-        field!(self.registers, timehr).read();
-    }
+    const RAM_ORIGIN: usize = 0x20000000;
+    const RAM_LEN: usize = 264 * 1024;
+    let cs = unsafe {
+        use crate::inter::CS;
 
-    #[inline(always)]
-    pub fn enable_irq(&mut self, timer: TimerIRQ) { 
-        field!(self.set_reg, int_enable).write(1 << (timer as usize));
+        CS::new()
+    };
+    let mut rosc = ROSC.lock(&cs);
+    let mut addr: usize = 0;
+    for _ in 0..100 {
+        let iter_addr: usize = 0;
+        let mut iter_addr = iter_addr.to_ne_bytes();
+        let addr_len = iter_addr.len();
+        rosc.get_random(&mut iter_addr, addr_len * 8);
+        let iter_addr = usize::from_ne_bytes(iter_addr);
+        addr ^= iter_addr; 
     }
-    
-    #[inline(always)]
-    pub fn disable_irq(&mut self, timer: TimerIRQ) { 
-        field!(self.clear_reg, int_enable).write(1 << (timer as usize));
+    addr %= RAM_LEN * 8;
+    println!("Have addr 0x{:x} (0x{:x})", addr / 8 + RAM_ORIGIN, RAM_ORIGIN + RAM_LEN);
+    let byte: *mut u8 = ptr::with_exposed_provenance_mut((addr / 8) + RAM_ORIGIN);
+    unsafe {
+        let mut current = byte.read_volatile();
+        current ^= 1 << (addr % 8);
+        byte.write_volatile(current);
+        let mut iter = (&raw const ITERATION).read_volatile();
+        iter += 1;
+        (&raw mut ITERATION).write_volatile(iter);
     }
-    
-    #[inline(always)]
-    pub fn clear_irq(&mut self, timer: TimerIRQ) {
-        field!(self.registers, int_raw).write(1 << (timer as usize));
+    proc
+}
+
+#[cfg(feature = "radiation")]
+pub unsafe fn get_radiation_iteration() -> u64 {
+    unsafe {
+        (&raw const ITERATION).read_volatile()
     }
 }
 
-unsafe impl Send for Timer {}
-unsafe impl Sync for Timer {}
-
-static TIMER_BASE: usize =  0x40054000;
-
-pub static TIMER: SpinIRQ<Timer> = unsafe {
-    SpinIRQ::new(Timer::new(TIMER_BASE))
-};
+#[unsafe(no_mangle)]
+pub unsafe fn kernel_exit(proc: *mut Proc) -> *mut Proc {
+    let current = read_time();
+    let prev = unsafe {
+        (&raw const PREVIOUS_TIME).read_volatile()
+    };
+    let mut max_time = unsafe {
+        (&raw const MAX_TIME).read_volatile()
+    };
+    let diff = current.wrapping_sub(prev);
+    if diff > max_time {
+        unsafe {
+            (&raw mut MAX_TIME).write_volatile(diff);
+        }
+        max_time = diff;
+    }
+    println!("Max time in kernel: {}us", max_time);
+    proc
+}

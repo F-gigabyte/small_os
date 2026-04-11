@@ -6,6 +6,3 @@ build-std = ["core", "compiler_builtins"]
 # Set default target to thumbv6m-none-eabi
 [build]
 target = "thumbv6m-none-eabi"
-
-[target.thumbv6m-none-eabi]
-runner = "gdb -x openocd.gdb"

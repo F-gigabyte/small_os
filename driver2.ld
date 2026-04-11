@@ -1,4 +1,4 @@
-ENTRY(main);
+ENTRY(_start);
 
 SECTIONS {
     __stack_size = 0x2000;

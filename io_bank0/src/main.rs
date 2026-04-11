@@ -1,9 +1,16 @@
+// use core intrinsics 
+#![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test::test_runner)]
+
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
 use core::ptr::{self};
 
-use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, read_header, receive, reply_empty, send, send_empty};
+use small_os_lib::{HeaderError, QueueError, args, check_critical, check_header_len, read_header, receive, reply_empty, send, send_empty};
 
 mod gpio_ctrl_register {
     pub const FUNCSEL_SHIFT: usize = 0;
@@ -41,6 +48,12 @@ mod gpio_ctrl_register {
     pub const IRQOVER_INVERT: u32 = 0x1 << IRQOVER_SHIFT;
     pub const IRQOVER_LOW: u32 = 0x2 << IRQOVER_SHIFT;
     pub const IRQOVER_HIGH: u32 = 0x3 << IRQOVER_SHIFT;
+
+    pub const VALID_MASK: u32 = FUNCSEL_MASK |
+        OUTOVER_MASK |
+        OEOVER_MASK |
+        INOVER_MASK |
+        IRQOVER_MASK;
 }
 
 pub const MAX_GPIO: u8 = 29;
@@ -56,14 +69,14 @@ pub enum GPIODrive {
 
 pub struct IOBank0 {
     registers: *mut u32,
-    func_sel: [u32; 4]
+    func_sel: &'static [u32]
 }
 
 impl IOBank0 {
-    unsafe fn new(base: usize, func_sel0: u32, func_sel1: u32, func_sel2: u32, func_sel3: u32) -> Self {
+    unsafe fn new(base: usize, func_sel: &'static [u32]) -> Self {
         let mut res = Self {
             registers: ptr::with_exposed_provenance_mut(base),
-            func_sel: [func_sel0, func_sel1, func_sel2, func_sel3]
+            func_sel
         };
         for i in 0..30 {
             res.reset_gpio(i as u8);
@@ -88,7 +101,11 @@ impl IOBank0 {
         let gpio_ptr = unsafe {
             self.registers.add((gpio as usize) * 2 + 1)
         };
-        let val = (((func as u32) << gpio_ctrl_register::FUNCSEL_SHIFT) & gpio_ctrl_register::FUNCSEL_MASK) |
+        let val = unsafe {
+            gpio_ptr.read_volatile()
+        };
+        let val = (val & !gpio_ctrl_register::VALID_MASK) |
+            ((func as u32) << gpio_ctrl_register::FUNCSEL_SHIFT) |
             gpio_ctrl_register::OUTOVER_NORMAL |
             gpio_ctrl_register::OEOVER_NORMAL |
             gpio_ctrl_register::INOVER_NORMAL |
@@ -259,15 +276,20 @@ const PADS_QUEUE: u32 = 1;
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main(num_args: usize, io_bank0_base: usize, func_sel0: u32, func_sel1: u32, func_sel2: u32, func_sel3: u32) {
-    assert!(num_args == 5);
+pub extern "C" fn main() {
+    let args = args();
+    assert_eq!(args.len(), 5);
+    let io_bank0_base = args[0] as usize;
+    let func_sel = &args[1..];
     // check reset is finished
     send_empty(RESET_QUEUE, 0, &[]).unwrap();
     // check pads is finished
     send_empty(PADS_QUEUE, 0, &[]).unwrap();
+    #[cfg(test)]
+    test_main();
     // don't reset IO Bank 0 as reset by kernel
     let mut io_bank0 = unsafe {
-        IOBank0::new(io_bank0_base, func_sel0, func_sel1, func_sel2, func_sel3)
+        IOBank0::new(io_bank0_base, func_sel)
     };
     loop {
         match Request::parse() {
@@ -296,6 +318,56 @@ pub extern "C" fn main(num_args: usize, io_bank0_base: usize, func_sel0: u32, fu
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Test framework which runs all the tests
+/// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+#[cfg(test)]
+mod test {
+    use small_os_lib::{kprint, kprintln};
+
+    use super::*;
+
+    pub fn test_runner(tests: &[&dyn Fn()]) {
+        kprintln!("Running {} tests for IO Bank 0", tests.len());
+        for test in tests {
+            test();
+        }
+    }
+
+    #[test_case]
+    fn test_valid() {
+        kprintln!("Testing IO bank 0 register mask values");
+        kprint!("Testing gpio ctrl register ");
+        assert_eq!(gpio_ctrl_register::VALID_MASK, 0x3003331f);
+        kprintln!("[ok]")
+    }
+
+    #[test_case]
+    fn test_setup() {
+        let args = args();
+        let io_bank0_base = args[0] as usize;
+        let func_sel = &args[1..];
+        let io_bank0 = unsafe {
+            IOBank0::new(io_bank0_base, func_sel)
+        };
+        kprintln!("Testing IO bank 0 setup"); 
+        for i in 0..30 {
+            let index = (i / 8) as usize;
+            let shift = (i % 8) * 4;
+            let mut func = (io_bank0.func_sel[index] >> shift & 0xf) as u8;
+            if func > 9 {
+                func = FUNC_NULL;
+            }
+            let expected = func as u32;
+            let offset = i * 2 + 1;
+            unsafe {
+                kprint!("Testing register gpio {} ctrl ", i);
+                assert_eq!(io_bank0.registers.add(offset).read_volatile() & gpio_ctrl_register::VALID_MASK, expected);
+                kprintln!("[ok]");
             }
         }
     }

@@ -1,10 +1,17 @@
+// use core intrinsics 
+#![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test::test_runner)]
+
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
 use core::{ptr::{self, NonNull}};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadOnly, ReadPureWrite, WriteOnly}};
-use small_os_lib::{HeaderError, QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, check_header_len, do_yield, read_header, reply_empty};
+use small_os_lib::{HeaderError, QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, args, check_critical, check_header_len, do_yield, read_header, reply_empty};
 
 #[repr(C)]
 struct ResetRegisters {
@@ -29,6 +36,8 @@ pub struct Reset {
     set_reg: UniqueMmioPointer<'static, ResetSetRegisters>,
     bitmap: u32
 }
+
+const RESET_VALID: u32 = 0x1ffffff;
 
 impl Reset {
     unsafe fn new(base: usize, bitmap: u32) -> Self {
@@ -172,8 +181,13 @@ impl Request {
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main(num_args: usize, reset_base: usize, bitmap: u32) {
-    assert!(num_args == 2);
+pub extern "C" fn main() {
+    let args = args();
+    assert_eq!(args.len(), 2);
+    #[cfg(test)]
+    test_main();
+    let reset_base = args[0] as usize;
+    let bitmap = args[1];
     let mut reset = unsafe {
         Reset::new(reset_base, bitmap)
     };
@@ -205,5 +219,36 @@ pub extern "C" fn main(num_args: usize, reset_base: usize, bitmap: u32) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use small_os_lib::{args, kprint, kprintln};
+
+    use super::*;
+
+    /// Test framework which runs all the tests
+    /// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+    pub fn test_runner(tests: &[&dyn Fn()]) {
+        kprintln!("Running {} tests for reset", tests.len());
+        for test in tests {
+            test();
+        }
+    }
+
+    #[test_case]
+    fn test_setup() {
+        let args = args();
+        let reset_base = args[0] as usize;
+        let bitmap = args[1];
+        let mut reset = unsafe {
+            Reset::new(reset_base, bitmap)
+        };
+        kprintln!("Testing reset setup");
+        let reset_mask = field!(reset.registers, reset).read();
+        kprint!("Testing reset register ");
+        assert_eq!(reset_mask & reset.bitmap, 0);
+        kprintln!("[ok]");
     }
 }

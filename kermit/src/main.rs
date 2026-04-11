@@ -1,9 +1,14 @@
+// use core intrinsics 
+#![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test::test_runner)]
+
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
-use core::mem;
-
-use small_os_lib::{HeaderError, QueueError, check_critical, check_header_len, kprintln, read_header, receive, reply_empty, send, send_empty};
+use small_os_lib::{HeaderError, QueueError, args, check_critical, check_header_len, read_header, receive, reply_empty, send, send_empty};
 
 /// Based off the kermit protocol as described at https://www.kermitproject.org/kproto.pdf
 /// (accessed 31/03/2026)
@@ -130,7 +135,7 @@ impl Kermit {
     fn calc_packet_data(header: &[u8], data: &[u8]) -> u8 {
         let s = header[1..].iter().fold(0u8, |a, b| a.wrapping_add(*b));
         let s = data.iter().fold(s, |a, b| a.wrapping_add(*b));
-        to_char((s + ((s & 192) / 64)) & 63)
+        to_char((s.wrapping_add((s & 192) / 64)) & 63)
     }
 
     fn check_packet_data(header: &[u8], data: &[u8], check: u8) -> Result<(), ()> {
@@ -388,7 +393,7 @@ pub enum Request {
 impl Request {
     pub fn parse(packet_len: usize) -> Result<Self, KermitError> {
         assert!(packet_len / 2 <= 45);
-        let mut header = read_header(0)?;
+        let header = read_header(0)?;
         match header.tag {
             0 => {
                 check_header_len(&header, 0, 0)?;
@@ -483,8 +488,11 @@ impl Request {
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main(num_args: usize) {
-    assert!(num_args == 0);
+pub extern "C" fn main() {
+    let args = args();
+    assert_eq!(args.len(), 0);
+    #[cfg(test)]
+    test_main();
     let mut kermit = Kermit::new();
     loop {
         match Request::parse(kermit.packet_len as usize) {
@@ -540,6 +548,20 @@ pub extern "C" fn main(num_args: usize) {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Test framework which runs all the tests
+/// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+#[cfg(test)]
+mod test {
+    use small_os_lib::kprintln;
+
+    pub fn test_runner(tests: &[&dyn Fn()]) {
+        kprintln!("Running {} tests for kermit", tests.len());
+        for test in tests {
+            test();
         }
     }
 }

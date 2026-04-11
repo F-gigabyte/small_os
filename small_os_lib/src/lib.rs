@@ -1,10 +1,48 @@
 // use core intrinsics 
 #![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+#![feature(macro_metavar_expr)]
+#![test_runner(crate::test_runner)]
 
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
-use core::{arch::asm, fmt::{self, Write}, intrinsics::abort, panic::PanicInfo};
+use core::{arch::asm, fmt::{self, Write}, intrinsics::abort, panic::PanicInfo, ptr, slice};
+
+unsafe extern "C" {
+    static _stack_args: u32;
+}
+
+pub fn args() -> &'static [u32] {
+    let stack = unsafe {
+        *(&raw const _stack_args)
+    };
+    let stack: *const u32 = ptr::with_exposed_provenance(stack as usize);
+    let stack = unsafe {
+        stack.sub(1)
+    };
+    let len = unsafe {
+        stack.read()
+    };
+    let start = unsafe {
+        stack.sub(len as usize)
+    };
+    unsafe {
+        slice::from_raw_parts(start, len as usize)
+    }
+}
+
+/// Test framework which runs all the tests
+/// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+#[cfg(test)]
+pub fn test_runner(tests: &[&dyn Fn()]) {
+    kprintln!("Running {} tests", tests.len());
+    for test in tests {
+        test();
+    }
+}
 
 /// panic handler
 /// this function is called when a panic happens
@@ -52,6 +90,12 @@ pub enum QueueError {
     Unknown(u32)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueIRQError {
+    IRQError(IRQError),
+    QueueError(QueueError)
+}
+
 impl TryFrom<u32> for QueueError {
     type Error = ();
 
@@ -70,6 +114,20 @@ impl TryFrom<u32> for QueueError {
             10 => Ok(Self::SenderInvalidMemoryAccess),
             11 => Ok(Self::NoQueueMask),
             _ => Ok(Self::Unknown(value))
+        }
+    }
+}
+
+impl TryFrom<u32> for QueueIRQError {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        if value == 0 {
+            Err(())
+        } else if value > 2 {
+            QueueError::try_from(value - 1).map(|err| Self::QueueError(err))
+        } else {
+            IRQError::try_from(value).map(|err| Self::IRQError(err))
         }
     }
 }
@@ -190,7 +248,7 @@ pub fn wait_irq() -> Result<u32, IRQError> {
             out("r0") irq 
         );
     }
-    decode_irq_res(res).map(|_| irq)
+    decode_res::<IRQError>(res).map(|_| irq)
 }
 
 pub fn clear_irq() -> Result<(), IRQError> {
@@ -204,18 +262,11 @@ pub fn clear_irq() -> Result<(), IRQError> {
             res = out(reg) res,
         );
     }
-    decode_irq_res(res)
+    decode_res::<IRQError>(res)
 }
 
-fn decode_queue_res(res: u32) -> Result<(), QueueError> {
-    match QueueError::try_from(res) {
-        Ok(err) => Err(err),
-        Err(()) => Ok(())
-    }
-}
-
-fn decode_irq_res(res: u32) -> Result<(), IRQError> {
-    match IRQError::try_from(res) {
+fn decode_res<E: TryFrom<u32, Error = ()>>(res: u32) -> Result<(), E> {
+    match E::try_from(res) {
         Ok(err) => Err(err),
         Err(()) => Ok(())
     }
@@ -245,7 +296,7 @@ pub fn send(target: u32, tag: u16, data: &mut [u8], send_len: usize, reply_len: 
             in("r3") data.as_ptr()
         );
     }
-    decode_queue_res(res)?;
+    decode_res::<QueueError>(res)?;
     check_reply_zero((reply, len)).map_err(|err| ReplyError::RequestError(err))
 }
 
@@ -270,7 +321,7 @@ pub fn send_empty(target: u32, tag: u16, data: &[u8]) -> Result<usize, ReplyErro
             in("r3") data.as_ptr()
         );
     }
-    decode_queue_res(res)?;
+    decode_res::<QueueError>(res)?;
     check_reply_zero((reply, len)).map_err(|err| ReplyError::RequestError(err))
 }
 
@@ -290,7 +341,7 @@ pub fn send_async(target: u32, tag: u16, data: &[u8]) -> Result<(), QueueError> 
             in("r3") data.as_ptr()
         );
     }
-    decode_queue_res(res)
+    decode_res::<QueueError>(res)
 }
 
 pub fn notify_send(queue: u32, notifier: u32) -> Result<(), QueueError> {
@@ -306,7 +357,7 @@ pub fn notify_send(queue: u32, notifier: u32) -> Result<(), QueueError> {
             in("r1") notifier,
         );
     }
-    decode_queue_res(res)
+    decode_res::<QueueError>(res)
 }
 
 pub fn wait_queues(queue_mask: u32) -> Result<u32, QueueError> {
@@ -322,7 +373,7 @@ pub fn wait_queues(queue_mask: u32) -> Result<u32, QueueError> {
             inout("r0") queue_mask => queue,
         );
     }
-    decode_queue_res(res).map(|_| queue)
+    decode_res::<QueueError>(res).map(|_| queue)
 }
 
 pub fn wait_queues_async(queue_mask: u32) -> Result<u32, QueueError> {
@@ -338,10 +389,10 @@ pub fn wait_queues_async(queue_mask: u32) -> Result<u32, QueueError> {
             inout("r0") queue_mask => queue,
         );
     }
-    decode_queue_res(res).map(|_| queue)
+    decode_res::<QueueError>(res).map(|_| queue)
 }
 
-pub fn wait_queues_irq(queue_mask: u32) -> Result<WakeSrc, QueueError> {
+pub fn wait_queues_irq(queue_mask: u32) -> Result<WakeSrc, QueueIRQError> {
     let mut res: u32;
     let mut queue_irq: u32;
     let mut src: u32;
@@ -356,10 +407,10 @@ pub fn wait_queues_irq(queue_mask: u32) -> Result<WakeSrc, QueueError> {
             out("r1") src
         );
     }
-    decode_queue_res(res).map(|_| WakeSrc::from((queue_irq, src)))
+    decode_res::<QueueIRQError>(res).map(|_| WakeSrc::from((queue_irq, src)))
 }
 
-pub fn wait_queues_irq_async(queue_mask: u32) -> Result<WakeSrc, QueueError> {
+pub fn wait_queues_irq_async(queue_mask: u32) -> Result<WakeSrc, QueueIRQError> {
     let mut res: u32;
     let mut queue_irq: u32;
     let mut src: u32;
@@ -374,7 +425,7 @@ pub fn wait_queues_irq_async(queue_mask: u32) -> Result<WakeSrc, QueueError> {
             out("r1") src
         );
     }
-    decode_queue_res(res).map(|_| WakeSrc::from((queue_irq, src)))
+    decode_res::<QueueIRQError>(res).map(|_| WakeSrc::from((queue_irq, src)))
 }
 
 fn check_reply_zero(reply: (u32, usize)) -> Result<usize, u32> {
@@ -406,7 +457,7 @@ pub fn read_header(queue: u32) -> Result<SyncHeader, QueueError> {
     }
     let send_len = (len & 0xffff) as u16;
     let reply_len = ((len >> 16) & 0xffff) as u16;
-    decode_queue_res(res).map(|_| 
+    decode_res::<QueueError>(res).map(|_| 
         SyncHeader { 
             pid, 
             pin_mask,
@@ -486,7 +537,7 @@ pub fn read_header_async(queue: u32) -> Result<AsyncHeader, QueueError> {
             out("r3") len,
         );
     }
-    decode_queue_res(res).map(|_| 
+    decode_res::<QueueError>(res).map(|_| 
         AsyncHeader { 
             pid, 
             pin_mask,
@@ -518,7 +569,7 @@ pub fn read_header_non_blocking(queue: u32) -> Result<SyncHeader, QueueError> {
     }
     let send_len = (len & 0xffff) as u16;
     let reply_len = ((len >> 16) & 0xffff) as u16;
-    decode_queue_res(res).map(|_| 
+    decode_res::<QueueError>(res).map(|_| 
         SyncHeader { 
             pid, 
             pin_mask,
@@ -549,7 +600,7 @@ pub fn read_header_async_non_blocking(queue: u32) -> Result<AsyncHeader, QueueEr
             out("r3") len,
         );
     }
-    decode_queue_res(res).map(|_| 
+    decode_res::<QueueError>(res).map(|_| 
         AsyncHeader { 
             pid,
             pin_mask,
@@ -581,7 +632,7 @@ pub fn notify_read_header(queue: u32) -> Result<SyncHeader, QueueError> {
     }
     let send_len = (len & 0xffff) as u16;
     let reply_len = ((len >> 16) & 0xffff) as u16;
-    decode_queue_res(res).map(|_| 
+    decode_res::<QueueError>(res).map(|_| 
         SyncHeader { 
             pid, 
             pin_mask,
@@ -608,7 +659,7 @@ pub fn receive(queue: u32, buffer: &mut[u8]) -> Result<usize, QueueError> {
             in("r2") buffer.as_ptr()
         );
     }
-    decode_queue_res(res).map(|_| read)
+    decode_res::<QueueError>(res).map(|_| read)
 }
 
 pub fn receive_async(queue: u32, buffer: &mut[u8]) -> Result<usize, QueueError> {
@@ -626,7 +677,7 @@ pub fn receive_async(queue: u32, buffer: &mut[u8]) -> Result<usize, QueueError> 
             in("r2") buffer.as_ptr()
         );
     }
-    decode_queue_res(res).map(|_| read)
+    decode_res::<QueueError>(res).map(|_| read)
 }
 
 pub fn notify_receive(notifier: u32, buffer: &mut[u8]) -> Result<usize, QueueError> {
@@ -644,7 +695,7 @@ pub fn notify_receive(notifier: u32, buffer: &mut[u8]) -> Result<usize, QueueErr
             in("r2") buffer.as_ptr()
         );
     }
-    decode_queue_res(res).map(|_| read)
+    decode_res::<QueueError>(res).map(|_| read)
 }
 
 pub fn reply(queue: u32, reply: u32, buffer: &[u8]) -> Result<(), QueueError> {
@@ -662,7 +713,7 @@ pub fn reply(queue: u32, reply: u32, buffer: &[u8]) -> Result<(), QueueError> {
             in("r3") buffer.as_ptr()
         );
     }
-    decode_queue_res(res)
+    decode_res::<QueueError>(res)
 }
 
 pub fn reply_empty(queue: u32, reply: u32) -> Result<(), QueueError> {
@@ -679,7 +730,7 @@ pub fn reply_empty(queue: u32, reply: u32) -> Result<(), QueueError> {
             in("r2") 0,
         );
     }
-    decode_queue_res(res)
+    decode_res::<QueueError>(res)
 }
 
 pub fn notify_reply(notifier: u32, reply: u32, buffer: &[u8]) -> Result<(), QueueError> {
@@ -697,7 +748,7 @@ pub fn notify_reply(notifier: u32, reply: u32, buffer: &[u8]) -> Result<(), Queu
             in("r3") buffer.as_ptr()
         );
     }
-    decode_queue_res(res)
+    decode_res::<QueueError>(res)
 }
 
 pub fn notify_reply_empty(notifier: u32, reply: u32) -> Result<(), QueueError> {
@@ -714,7 +765,7 @@ pub fn notify_reply_empty(notifier: u32, reply: u32) -> Result<(), QueueError> {
             in("r2") 0,
         );
     }
-    decode_queue_res(res)
+    decode_res::<QueueError>(res)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -739,13 +790,6 @@ impl TryFrom<u32> for KPrintError {
     }
 }
 
-fn decode_kprint_res(res: u32) -> Result<(), KPrintError> {
-    match KPrintError::try_from(res) {
-        Ok(err) => Err(err),
-        Err(()) => Ok(())
-    }
-}
-
 pub fn do_kprint(text: &str) -> Result<usize, KPrintError> {
     let data = text.as_bytes();
     let mut res: u32;
@@ -761,7 +805,7 @@ pub fn do_kprint(text: &str) -> Result<usize, KPrintError> {
             in("r1") data.as_ptr()
         );
     }
-    decode_kprint_res(res).map(|_| len as usize)
+    decode_res::<KPrintError>(res).map(|_| len as usize)
 }
 
 struct KPrint {}

@@ -1,10 +1,18 @@
+// use core intrinsics 
+#![feature(core_intrinsics)]
+// test framework
+#![feature(custom_test_frameworks)]
+
+#![test_runner(crate::test::test_runner)]
+
 #![no_std]
 #![no_main]
+#![reexport_test_harness_main = "test_main"]
 
 use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, ReadWrite, WriteOnly}};
-use small_os_lib::{QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, check_critical, do_yield, read_header, receive, reply, reply_empty, send_empty, wait_irq};
+use small_os_lib::{QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, args, check_critical, do_yield, read_header, receive, reply, reply_empty, send_empty, wait_irq};
 
 mod ctrl0_register {
     pub const DATA_SIZE_SHIFT: usize = 0;
@@ -17,7 +25,7 @@ mod ctrl0_register {
     pub const FRAME_FORMAT_MASK: u32 = 0x3 << FRAME_FORMAT_SHIFT;
     pub const POLARITY_MASK: u32 = 1 << POLARITY_SHIFT;
     pub const PHASE_MASK: u32 = 1 << PHASE_SHIFT;
-    pub const SERIAL_CLOCK_MASK: u32 = 0xf << SERIAL_CLOCK_SHIFT;
+    pub const SERIAL_CLOCK_MASK: u32 = 0xff << SERIAL_CLOCK_SHIFT;
 
     pub const DATA_SIZE_4BIT: u32 = 0x3 << DATA_SIZE_SHIFT;
     pub const DATA_SIZE_5BIT: u32 = 0x4 << DATA_SIZE_SHIFT;
@@ -36,6 +44,12 @@ mod ctrl0_register {
     pub const FRAME_FORMAT_NORMAL: u32 = 0 << FRAME_FORMAT_SHIFT;
     pub const FRAME_FORMAT_TI: u32 = 1 << FRAME_FORMAT_SHIFT;
     pub const FRAME_FORMAT_NATIONAL_MICROWIRE: u32 = 2 << FRAME_FORMAT_SHIFT;
+
+    pub const VALID_MASK: u32 = DATA_SIZE_MASK |
+        FRAME_FORMAT_MASK |
+        POLARITY_MASK |
+        PHASE_MASK |
+        SERIAL_CLOCK_MASK;
 }
 
 mod ctrl1_register {
@@ -48,12 +62,19 @@ mod ctrl1_register {
     pub const ENABLE_MASK: u32 = 1 << ENABLE_SHIFT;
     pub const SLAVE_MASK: u32 = 1 << SLAVE_SHIFT;
     pub const SLAVE_OUTPUT_MASK: u32 = 1 << SLAVE_OUTPUT_SHIFT;
+
+    pub const VALID_MASK: u32 = LOOP_BACK_MASK |
+        ENABLE_MASK |
+        SLAVE_MASK |
+        SLAVE_OUTPUT_MASK;
 }
 
 mod data_register {
     pub const DATA_SHIFT: usize = 0;
 
     pub const DATA_MASK: u32 = 0xffff << DATA_SHIFT;
+
+    pub const VALID_MASK: u32 = DATA_MASK;
 }
 
 mod status_register {
@@ -68,12 +89,20 @@ mod status_register {
     pub const RX_NOT_EMPTY_MASK: u32 = 1 << RX_NOT_EMPTY_SHIFT;
     pub const RX_FULL_MASK: u32 = 1 << RX_FULL_SHIFT;
     pub const BUSY_MASK: u32 = 1 << BUSY_SHIFT;
+
+    pub const VALID_MASK: u32 = TX_EMPTY_MASK |
+        TX_NOT_FULL_MASK |
+        RX_NOT_EMPTY_MASK |
+        RX_FULL_MASK |
+        BUSY_MASK;
 }
 
 mod div_register {
     pub const DIV_SHIFT: usize = 0;
     
     pub const DIV_MASK: u32 = 0xff << DIV_SHIFT;
+
+    pub const VALID_MASK: u32 = DIV_MASK;
 }
 
 mod inter_register {
@@ -87,7 +116,10 @@ mod inter_register {
     pub const RX_FIFO_MASK: u32 = 1 << RX_FIFO_SHIFT;
     pub const TX_FIFO_MASK: u32 = 1 << TX_FIFO_SHIFT;
 
-    pub const ALL_MASK: u32 = RX_OVERRUN_MASK | RX_TIMEOUT_MASK | RX_FIFO_MASK | TX_FIFO_MASK;
+    pub const VALID_MASK: u32 = RX_OVERRUN_MASK | 
+        RX_TIMEOUT_MASK | 
+        RX_FIFO_MASK | 
+        TX_FIFO_MASK;
 }
 
 mod inter_clear_register {
@@ -97,7 +129,19 @@ mod inter_clear_register {
     pub const RX_OVERRUN_MASK: u32 = 1 << RX_OVERRUN_SHIFT;
     pub const RX_TIMEOUT_MASK: u32 = 1 << RX_TIMEOUT_SHIFT;
 
-    pub const ALL_MASK: u32 = RX_OVERRUN_MASK | RX_TIMEOUT_MASK;
+    pub const VALID_MASK: u32 = RX_OVERRUN_MASK | 
+        RX_TIMEOUT_MASK;
+}
+
+mod dma_register {
+    pub const RX_DMA_SHIFT: usize = 0;
+    pub const TX_DMA_SHIFT: usize = 1;
+
+    pub const RX_DMA_MASK: u32 = 1 << RX_DMA_SHIFT;
+    pub const TX_DMA_MASK: u32 = 1 << TX_DMA_SHIFT;
+
+    pub const VALID_MASK: u32 = RX_DMA_MASK |
+        TX_DMA_MASK;
 }
 
 #[repr(C)]
@@ -132,17 +176,21 @@ impl SPI {
         while field!(res.registers, status).read() & status_register::BUSY_MASK != 0 {
             do_yield().unwrap();
         }
-        field!(res.registers, ctrl1).write(0);
-        field!(res.registers, ctrl0).write(0);
-        field!(res.registers, ctrl0).write(
+        field!(res.registers, ctrl1).modify(|ctrl1| ctrl1 & !ctrl1_register::VALID_MASK);
+        field!(res.registers, ctrl0).modify(|ctrl0| ctrl0 & !ctrl0_register::VALID_MASK);
+        field!(res.registers, ctrl0).modify(|ctrl0|
+            (ctrl0 & !ctrl0_register::VALID_MASK) |
             ctrl0_register::DATA_SIZE_8BIT |
             ctrl0_register::FRAME_FORMAT_NORMAL | 
             (2 << ctrl0_register::SERIAL_CLOCK_SHIFT)
         );
-        field!(res.registers, div).write(2);
-        field!(res.registers, inter_mask_set_clear).write(inter_clear_register::ALL_MASK);
-        field!(res.registers, inter_clear).write(inter_clear_register::ALL_MASK);
-        field!(res.registers, dma).write(0);
+        field!(res.registers, div).modify(|div|
+            (div & !div_register::VALID_MASK) |
+            (2 << div_register::DIV_SHIFT)
+        );
+        field!(res.registers, inter_mask_set_clear).modify(|inter_mask| inter_mask & !inter_clear_register::VALID_MASK);
+        field!(res.registers, inter_clear).write(inter_clear_register::VALID_MASK);
+        field!(res.registers, dma).modify(|dma| dma & !dma_register::VALID_MASK);
         res.cs_high();
         res
     }
@@ -184,7 +232,12 @@ impl SPI {
         if tx_index < len {
             tx_inter = inter_register::TX_FIFO_MASK;
         }
-        field!(self.registers, inter_mask_set_clear).write(inter_register::RX_FIFO_MASK | inter_register::RX_OVERRUN_MASK | tx_inter);
+        field!(self.registers, inter_mask_set_clear).modify(|inter_mask|
+            (inter_mask & !inter_register::VALID_MASK) |
+            inter_register::RX_FIFO_MASK | 
+            inter_register::RX_OVERRUN_MASK | 
+            tx_inter
+        );
         self.cs_low();
         field!(self.set_reg, ctrl1).write(ctrl1_register::ENABLE_MASK);
         while rx_index < len.saturating_sub(4) {
@@ -208,7 +261,11 @@ impl SPI {
             }
             if field!(self.registers, mask_inter).read() & inter_register::TX_FIFO_MASK != 0 {
                 if tx_index == len {
-                    field!(self.registers, inter_mask_set_clear).write(inter_register::RX_FIFO_MASK | inter_register::RX_OVERRUN_MASK);
+                    field!(self.registers, inter_mask_set_clear).modify(|inter_mask|
+                        (inter_mask & !inter_register::VALID_MASK) |
+                        inter_register::RX_FIFO_MASK | 
+                        inter_register::RX_OVERRUN_MASK
+                    );
                 } else {
                     loop {
                         let status = field!(self.registers, status).read();
@@ -375,9 +432,13 @@ impl Request {
 /// Program entry point
 /// Disables mangling so it can be called from assembly
 #[unsafe(no_mangle)]
-pub extern "C" fn main(num_args: usize, spi_base: usize) {
-    assert!(num_args == 2);
+pub extern "C" fn main() {
+    let args = args();
+    assert_eq!(args.len(), 2);
     send_empty(IO_BANK0_QUEUE, 0, &[]).unwrap();
+    #[cfg(test)]
+    test_main();
+    let spi_base = args[0] as usize;
     let mut spi = unsafe {
         SPI::new(spi_base)
     };
@@ -412,5 +473,80 @@ pub extern "C" fn main(num_args: usize, spi_base: usize) {
                 }
             }
         }
+    }
+}
+
+/// Test framework which runs all the tests
+/// Based off https://os.phil-opp.com/testing/ accessed 6/02/2026
+#[cfg(test)]
+mod test {
+    use small_os_lib::{kprint, kprintln};
+
+    use super::*;
+
+    pub fn test_runner(tests: &[&dyn Fn()]) {
+        kprintln!("Running {} tests for SPI", tests.len());
+        for test in tests {
+            test();
+        }
+    }
+
+    #[test_case]
+    fn test_valid() {
+        kprintln!("Testing SPI register mask values");
+        kprint!("Testing ctrl0 register ");
+        assert_eq!(ctrl0_register::VALID_MASK, 0xffff);
+        kprintln!("[ok]");
+        kprint!("Testing ctrl1 register ");
+        assert_eq!(ctrl1_register::VALID_MASK, 0xf);
+        kprintln!("[ok]");
+        kprint!("Testing data register ");
+        assert_eq!(data_register::VALID_MASK, 0xffff);
+        kprintln!("[ok]");
+        kprint!("Testing status register ");
+        assert_eq!(status_register::VALID_MASK, 0x1f);
+        kprintln!("[ok]");
+        kprint!("Testing div register ");
+        assert_eq!(div_register::VALID_MASK, 0xff);
+        kprintln!("[ok]");
+        kprint!("Testing inter register ");
+        assert_eq!(inter_register::VALID_MASK, 0xf);
+        kprintln!("[ok]");
+        kprint!("Testing inter clear register ");
+        assert_eq!(inter_clear_register::VALID_MASK, 0x3);
+        kprintln!("[ok]");
+        kprint!("Testing dma register ");
+        assert_eq!(dma_register::VALID_MASK, 0x3);
+        kprintln!("[ok]");
+    }
+
+    #[test_case]
+    fn test_setup() {
+        let args = args();
+        let spi_base = args[0] as usize;
+        let mut spi = unsafe {
+            SPI::new(spi_base)
+        };
+        kprintln!("Testing SPI setup");
+        kprint!("Testing ctrl0 register ");
+        let ctrl0 = field!(spi.registers, ctrl0).read();
+        assert_eq!(ctrl0 & ctrl0_register::VALID_MASK, 0x207);
+        kprintln!("[ok]");
+        kprint!("Testing ctrl1 register ");
+        let ctrl1 = field!(spi.registers, ctrl1).read();
+        assert_eq!(ctrl1 & ctrl1_register::VALID_MASK, 0);
+        kprintln!("[ok]");
+        kprint!("Testing div register ");
+        let div = field!(spi.registers, div).read();
+        assert_eq!(div & div_register::VALID_MASK, 2);
+        kprintln!("[ok]");
+        kprint!("Testing inter mask set clear register ");
+        let inter_mask = field!(spi.registers, inter_mask_set_clear).read();
+        assert_eq!(inter_mask & inter_register::VALID_MASK, 0);
+        kprintln!("[ok]");
+        kprint!("Testing dma register ");
+        let dma = field!(spi.registers, dma).read();
+        assert_eq!(dma & dma_register::VALID_MASK, 0);
+        kprintln!("[ok]");
     }
 }
