@@ -185,7 +185,7 @@ pub enum Request {
 impl Request {
     /// Parses the next request  
     /// `bitmap` is the device bitmap  
-    /// Returns the request on success or an `ResetError` on failure
+    /// Returns the request on success or a `ResetError` on failure
     pub fn parse(bitmap: u32) -> Result<Self, ResetError> {
         let header = read_header(0)?;
         match header.tag {
