@@ -7,3 +7,7 @@ edition = "2024"
 
 [dependencies]
 small_os_lib = { path = "../small_os_lib" }
+
+[features]
+default = ["camera"]
+camera = []

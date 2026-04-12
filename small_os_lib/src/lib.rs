@@ -1,3 +1,21 @@
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of the SmallOS Library.
+ *
+ * The SmallOS Library is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU Lesser General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * The SmallOS Library is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with the SmallOS Library. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
 // use core intrinsics 
 #![feature(core_intrinsics)]
 // test framework
@@ -12,9 +30,11 @@
 use core::{arch::asm, fmt::{self, Write}, intrinsics::abort, panic::PanicInfo, ptr, slice};
 
 unsafe extern "C" {
+    /// Where the kernel stack arguments are stored
     static _stack_args: u32;
 }
 
+/// Returns the program arguments passed in on the stack from the kernel
 pub fn args() -> &'static [u32] {
     let stack = unsafe {
         *(&raw const _stack_args)
@@ -44,26 +64,45 @@ pub fn test_runner(tests: &[&dyn Fn()]) {
     }
 }
 
-/// panic handler
-/// this function is called when a panic happens
+/// Panic Handler  
+/// This function is called when a panic happens
 #[panic_handler]
 pub fn panic(_info: &PanicInfo) -> ! {
     kprintln!("{}", _info);
     abort()
 }
 
-// offset for clearing registers as specified in SDK https://github.com/raspberrypi/pico-sdk/blob/a1438dff1d38bd9c65dbd693f0e5db4b9ae91779/src/rp2040/hardware_regs/include/hardware/regs/addressmap.h#L21
-// lines 18 to 21 (accessed 19/01/2026)
+/// MMIO set alias offset from register base
+/// Writing a bit sets the corresponding bit in the base registers  
+/// Register aliases as specified in SDK <https://github.com/raspberrypi/pico-sdk/blob/a1438dff1d38bd9c65dbd693f0e5db4b9ae91779/src/rp2040/hardware_regs/include/hardware/regs/addressmap.h#L21>
+/// lines 18 to 21 (accessed 19/01/2026)
+/// under the license
+/// Copyright (c) 2024 Raspberry Pi Ltd.
+///
+/// SPDX-License-Identifier: BSD-3-Clause
 pub const REG_ALIAS_SET_BITS: usize = 0x2 << 12;
+/// MMIO clear alias offset from register base  
+/// Writing a bit clears the corresponding bit in the base registers  
+/// Register aliases as specified in SDK <https://github.com/raspberrypi/pico-sdk/blob/a1438dff1d38bd9c65dbd693f0e5db4b9ae91779/src/rp2040/hardware_regs/include/hardware/regs/addressmap.h#L21>
+/// lines 18 to 21 (accessed 19/01/2026)
+/// under the license
+/// Copyright (c) 2024 Raspberry Pi Ltd.
+///
+/// SPDX-License-Identifier: BSD-3-Clause
 pub const REG_ALIAS_CLR_BITS: usize = 0x3 << 12;
 
+/// Source of which this process was woken by
 #[derive(Debug, Clone, Copy)]
 pub enum WakeSrc {
+    /// Woken up by a queue
     Queue(u32),
+    /// Woken up by an IRQ
     IRQ(u32),
+    /// Woken up by an unknown source
     Unknown(u32)
 }
 
+/// Converts a pair of `u32` to their corresponding `WakeSrc`
 impl From<(u32, u32)> for WakeSrc {
     fn from(value: (u32, u32)) -> Self {
         match value.0 {
@@ -74,28 +113,45 @@ impl From<(u32, u32)> for WakeSrc {
     }
 }
 
+/// Errors returned when completing queue operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueError {
+    /// Unknown system call
     UnknownSysCall,
+    /// Queue is empty
     QueueEmpty,
+    /// Provided buffer is too small
     BufferTooSmall,
+    /// Queue is full
     QueueFull,
+    /// Invalid queue was specified
     InvalidQueue,
+    /// Invalid notifier was specified
     InvalidNotifier,
+    /// Provided buffer is too large
     BufferTooLarge,
+    /// Process died while in queue
     Died,
+    /// Invalid memory access performed in queue
     InvalidMemoryAccess,
+    /// Sender performed an invalid memory access
     SenderInvalidMemoryAccess,
+    /// A queue mask with no queues was provided
     NoQueueMask,
+    /// An unknown error happened
     Unknown(u32)
 }
 
+/// A queue or an IRQ error
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueIRQError {
+    /// An IRQ error
     IRQError(IRQError),
+    /// A queue error
     QueueError(QueueError)
 }
 
+/// Casts from a `u32` to a `QueueError`
 impl TryFrom<u32> for QueueError {
     type Error = ();
 
@@ -118,6 +174,7 @@ impl TryFrom<u32> for QueueError {
     }
 }
 
+/// Casts from a `u32` to a `QueueIRQError`
 impl TryFrom<u32> for QueueIRQError {
     type Error = ();
 
@@ -132,29 +189,53 @@ impl TryFrom<u32> for QueueIRQError {
     }
 }
 
+/// A request reply error
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReplyError {
+    /// Error with queue operations
     QueueError(QueueError),
+    /// Error with the request
     RequestError(u32)
 }
 
+/// Converts from a `QueueError` to a `ReplyError`
 impl From<QueueError> for ReplyError {
     fn from(value: QueueError) -> Self {
         Self::QueueError(value)
     }
 }
 
+/// A yield error
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum YieldError {
+    /// Unknown system call
+    UnknownSysCall,
+    /// An unknown error happened
     Unknown(u32)
 }
 
+/// Casts from a `u32` to a `YieldError`
+impl TryFrom<u32> for YieldError {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Err(()),
+            1 => Ok(Self::UnknownSysCall),
+            _ => Ok(Self::Unknown(value))
+        }
+    }
+}
+
 impl QueueError {
+    /// Determines if the `QueueError` was critical
     pub fn critical(&self) -> bool {
         !matches!(self, QueueError::Died | QueueError::SenderInvalidMemoryAccess)
     }
 }
 
+/// Determines if the result is a critical queue error and transforms the error to `None` if not  
+/// `res` is the result to check
 pub fn check_critical<T>(res: Result<T, QueueError>) -> Option<Result<T, QueueError>> {
     match res {
         Ok(res) => Some(Ok(res)),
@@ -168,13 +249,18 @@ pub fn check_critical<T>(res: Result<T, QueueError>) -> Option<Result<T, QueueEr
     }
 }
 
+/// An IRQ error
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IRQError {
+    /// An unknown system call
     UnknownSysCall,
+    /// This process has no IRQs
     NoIRQ,
+    /// An unknown error happened
     Unknown(u32)
 }
 
+/// Casts from a `u32` to an `IRQError`
 impl TryFrom<u32> for IRQError {
     type Error = ();
 
@@ -188,25 +274,39 @@ impl TryFrom<u32> for IRQError {
     }
 }
 
+/// An asynchronous message header
 #[derive(Debug, Clone)]
 pub struct AsyncHeader {
+    /// PID of sending process
     pub pid: u32,
+    /// Sending process' GPIO pin mask
     pub pin_mask: u32,
+    /// Sending process' driver
     pub driver: u16,
+    /// Message tag
     pub tag: u16,
+    /// Message length
     pub message_len: u32
 }
 
+/// A synchronous message header
 #[derive(Debug, Clone)]
 pub struct SyncHeader {
+    /// PID of sending process
     pub pid: u32,
+    /// Sending process' GPIO pin mask
     pub pin_mask: u32,
+    /// Sending process' driver
     pub driver: u16,
+    /// Message tag
     pub tag: u16,
+    /// Message send length
     pub send_len: u16,
+    /// Message reply length
     pub reply_len: u16
 }
 
+/// Gives up the rest of this process' time quantum
 pub fn do_yield() -> Result<(), YieldError> {
     let mut res: u32;
     unsafe {
@@ -218,12 +318,11 @@ pub fn do_yield() -> Result<(), YieldError> {
             res = out(reg) res,
         );
     }
-    match res {
-        0 => Ok(()),
-        _ => Err(YieldError::Unknown(res))
-    }
+    decode_res::<YieldError>(res)
 }
 
+/// Kills the current process  
+/// `code` is the exit code
 pub fn exit(code: u32) {
     unsafe {
         asm!(
@@ -235,6 +334,8 @@ pub fn exit(code: u32) {
     }
 }
 
+/// Wait on one of the process' IRQs to fire  
+/// Returns the IRQ index on success or an `IRQError` on failure
 pub fn wait_irq() -> Result<u32, IRQError> {
     let mut res: u32;
     let mut irq: u32;
@@ -251,6 +352,7 @@ pub fn wait_irq() -> Result<u32, IRQError> {
     decode_res::<IRQError>(res).map(|_| irq)
 }
 
+/// Clears the process' IRQ state masks
 pub fn clear_irq() -> Result<(), IRQError> {
     let mut res: u32;
     unsafe {
@@ -265,6 +367,8 @@ pub fn clear_irq() -> Result<(), IRQError> {
     decode_res::<IRQError>(res)
 }
 
+/// Converts a result integer into its corresponding error  
+/// `res` is the result to convert
 fn decode_res<E: TryFrom<u32, Error = ()>>(res: u32) -> Result<(), E> {
     match E::try_from(res) {
         Ok(err) => Err(err),
@@ -272,6 +376,14 @@ fn decode_res<E: TryFrom<u32, Error = ()>>(res: u32) -> Result<(), E> {
     }
 }
 
+/// Sends a message to another process  
+/// `target` is the endpoint to use  
+/// `tag` is the message tag to send  
+/// `data` is the message data to send and where the received data will be placed  
+/// `send_len` is the length of the message to send  
+/// `reply_len` is the maximum length of the reply  
+/// On success returns the number of bytes written into `data` or else returns the corresponding
+/// error
 pub fn send(target: u32, tag: u16, data: &mut [u8], send_len: usize, reply_len: usize) -> Result<usize, ReplyError> {
     let mut res: u32;
     let mut reply: u32;
@@ -300,6 +412,11 @@ pub fn send(target: u32, tag: u16, data: &mut [u8], send_len: usize, reply_len: 
     check_reply_zero((reply, len)).map_err(|err| ReplyError::RequestError(err))
 }
 
+/// Sends a message to another process with no reply  
+/// `target` is the endpoint to use  
+/// `tag` is the message tag to send  
+/// `data` is the message data to send  
+/// On success returns 0 or else returns the corresponding error
 pub fn send_empty(target: u32, tag: u16, data: &[u8]) -> Result<usize, ReplyError> {
     let mut res: u32;
     let mut reply: u32;
@@ -325,6 +442,10 @@ pub fn send_empty(target: u32, tag: u16, data: &[u8]) -> Result<usize, ReplyErro
     check_reply_zero((reply, len)).map_err(|err| ReplyError::RequestError(err))
 }
 
+/// Sends an asynchronous message to another process   
+/// `target` is the asynchronous endpoint to use  
+/// `tag` is the message tag to send  
+/// `data` is the message data to send  
 pub fn send_async(target: u32, tag: u16, data: &[u8]) -> Result<(), QueueError> {
     let mut res: u32;
     let tag = tag as u32;
@@ -344,6 +465,9 @@ pub fn send_async(target: u32, tag: u16, data: &[u8]) -> Result<(), QueueError> 
     decode_res::<QueueError>(res)
 }
 
+/// Sends a process in one of this process' synchronous queues into one of its notifier queues  
+/// `queue` is the synchronous queue to send the process from  
+/// `notifier` is the notifier queue to send the process to
 pub fn notify_send(queue: u32, notifier: u32) -> Result<(), QueueError> {
     let mut res: u32;
     unsafe {
@@ -360,6 +484,9 @@ pub fn notify_send(queue: u32, notifier: u32) -> Result<(), QueueError> {
     decode_res::<QueueError>(res)
 }
 
+/// Waits on queues in a queue mask to receive data  
+/// `queue_mask` is a mask of all the queues to wait on  
+/// Returns the index of one of the queues containing data on success or a `QueueError` on error
 pub fn wait_queues(queue_mask: u32) -> Result<u32, QueueError> {
     let mut res: u32;
     let mut queue: u32;
@@ -376,6 +503,9 @@ pub fn wait_queues(queue_mask: u32) -> Result<u32, QueueError> {
     decode_res::<QueueError>(res).map(|_| queue)
 }
 
+/// Waits on asynchronous queues in a queue mask to receive data  
+/// `queue_mask` is a mask of all the asynchronous queues to wait on  
+/// Returns the index of one of the queues containing data on success or a `QueueError` on error
 pub fn wait_queues_async(queue_mask: u32) -> Result<u32, QueueError> {
     let mut res: u32;
     let mut queue: u32;
@@ -392,6 +522,9 @@ pub fn wait_queues_async(queue_mask: u32) -> Result<u32, QueueError> {
     decode_res::<QueueError>(res).map(|_| queue)
 }
 
+/// Waits on queues in a queue mask to receive data or for an IRQ event  
+/// `queue_mask` is a mask of all the queues to wait on  
+/// On success returns the source of what woke this process or returns a `QueueIRQError` on failure
 pub fn wait_queues_irq(queue_mask: u32) -> Result<WakeSrc, QueueIRQError> {
     let mut res: u32;
     let mut queue_irq: u32;
@@ -410,6 +543,9 @@ pub fn wait_queues_irq(queue_mask: u32) -> Result<WakeSrc, QueueIRQError> {
     decode_res::<QueueIRQError>(res).map(|_| WakeSrc::from((queue_irq, src)))
 }
 
+/// Waits on asynchronous queues in a queue mask to receive data or for an IRQ event  
+/// `queue_mask` is a mask of all the asynchronous queues to wait on  
+/// On success returns the source of what woke this process or returns a `QueueIRQError` on failure
 pub fn wait_queues_irq_async(queue_mask: u32) -> Result<WakeSrc, QueueIRQError> {
     let mut res: u32;
     let mut queue_irq: u32;
@@ -428,6 +564,8 @@ pub fn wait_queues_irq_async(queue_mask: u32) -> Result<WakeSrc, QueueIRQError> 
     decode_res::<QueueIRQError>(res).map(|_| WakeSrc::from((queue_irq, src)))
 }
 
+/// Checks if the queue's reply was 0 and returns the number of bytes sent  
+/// `reply` is a pair of the queue's reply and the number of bytes written
 fn check_reply_zero(reply: (u32, usize)) -> Result<usize, u32> {
     if reply.0 == 0 {
         Ok(reply.1)
@@ -436,6 +574,9 @@ fn check_reply_zero(reply: (u32, usize)) -> Result<usize, u32> {
     }
 }
 
+/// Reads the header of the next process in the queue
+/// `queue` is the queue to read the header from  
+/// On success returns the header or a `QueueError` on failure
 pub fn read_header(queue: u32) -> Result<SyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
@@ -469,6 +610,11 @@ pub fn read_header(queue: u32) -> Result<SyncHeader, QueueError> {
     )
 }
 
+/// Reads the header of the next process in the queue and repeats until a header is read or a
+/// critical error happens
+/// `queue` is the queue to read the header from  
+/// `invalid_response` is the response to send on errors
+/// On success returns the header or a `QueueError` on failure
 pub fn next_valid_header(queue: u32, invalid_response: u32) -> Result<SyncHeader, QueueError> {
     loop {
         let header = read_header(queue);
@@ -500,6 +646,13 @@ pub fn next_valid_header(queue: u32, invalid_response: u32) -> Result<SyncHeader
     }
 }
 
+/// Reads the message data of the next process in the queue into the provided buffer and repeats
+/// until a message's data is read or a critical error happens  
+/// `queue` is the queue to read the data from  
+/// `buffer` is the buffer to write the data to  
+/// `invalid_response` is the response to send on errors  
+/// `too_large_response` is the response to send if the message data is too large
+/// On success returns the number of bytes read or a `QueueError` on failure
 pub fn next_message(queue: u32, buffer: &mut[u8], invalid_response: u32, too_large_response: u32) -> Result<usize, QueueError> {
     loop {
         let res = receive(queue, buffer);
@@ -518,6 +671,9 @@ pub fn next_message(queue: u32, buffer: &mut[u8], invalid_response: u32, too_lar
     }
 }
 
+/// Reads the header of the message in the asynchronous queue
+/// `queue` is the asynchronous queue to read the header from  
+/// On success returns the header or a `QueueError` on failure
 pub fn read_header_async(queue: u32) -> Result<AsyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
@@ -548,6 +704,9 @@ pub fn read_header_async(queue: u32) -> Result<AsyncHeader, QueueError> {
     )
 }
 
+/// Reads the header of the next process in the queue without blocking this process
+/// `queue` is the queue to read the header from  
+/// On success returns the header or a `QueueError` on failure
 pub fn read_header_non_blocking(queue: u32) -> Result<SyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
@@ -581,6 +740,9 @@ pub fn read_header_non_blocking(queue: u32) -> Result<SyncHeader, QueueError> {
     )
 }
 
+/// Reads the header of the message in the asynchronous queue without blocking this process
+/// `queue` is the asynchronous queue to read the header from  
+/// On success returns the header or a `QueueError` on failure
 pub fn read_header_async_non_blocking(queue: u32) -> Result<AsyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
@@ -611,6 +773,9 @@ pub fn read_header_async_non_blocking(queue: u32) -> Result<AsyncHeader, QueueEr
     )
 }
 
+/// Reads the header of the next process in the notifier queue
+/// `queue` is the notifier queue to read the header from  
+/// On success returns the header or a `QueueError` on failure
 pub fn notify_read_header(queue: u32) -> Result<SyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
@@ -644,6 +809,10 @@ pub fn notify_read_header(queue: u32) -> Result<SyncHeader, QueueError> {
     )
 }
 
+/// Receives message data from the process at the front of the queue into the buffer  
+/// `queue` is the queue being read from  
+/// `buffer` is the buffer being written into  
+/// Returns the number of bytes read on success or a `QueueError` on failure
 pub fn receive(queue: u32, buffer: &mut[u8]) -> Result<usize, QueueError> {
     let mut res: u32;
     let mut read: usize;
@@ -662,6 +831,10 @@ pub fn receive(queue: u32, buffer: &mut[u8]) -> Result<usize, QueueError> {
     decode_res::<QueueError>(res).map(|_| read)
 }
 
+/// Receives message data from the message at the front of the asynchronous queue into the buffer  
+/// `queue` is the asynchronous queue being read from  
+/// `buffer` is the buffer being written into  
+/// Returns the number of bytes read on success or a `QueueError` on failure
 pub fn receive_async(queue: u32, buffer: &mut[u8]) -> Result<usize, QueueError> {
     let mut res: u32;
     let mut read: usize;
@@ -680,6 +853,10 @@ pub fn receive_async(queue: u32, buffer: &mut[u8]) -> Result<usize, QueueError> 
     decode_res::<QueueError>(res).map(|_| read)
 }
 
+/// Receives message data from the process at the front of the notifier queue into the buffer  
+/// `queue` is the notifier queue being read from  
+/// `buffer` is the buffer being written into  
+/// Returns the number of bytes read on success or a `QueueError` on failure
 pub fn notify_receive(notifier: u32, buffer: &mut[u8]) -> Result<usize, QueueError> {
     let mut res: u32;
     let mut read: usize;
@@ -698,6 +875,10 @@ pub fn notify_receive(notifier: u32, buffer: &mut[u8]) -> Result<usize, QueueErr
     decode_res::<QueueError>(res).map(|_| read)
 }
 
+/// Sends a reply to the process at the front of the queue  
+/// `queue` is the queue to reply to  
+/// `reply` is the tag of the reply message  
+/// `buffer` is the content of the reply message
 pub fn reply(queue: u32, reply: u32, buffer: &[u8]) -> Result<(), QueueError> {
     let mut res: u32;
     unsafe {
@@ -716,6 +897,9 @@ pub fn reply(queue: u32, reply: u32, buffer: &[u8]) -> Result<(), QueueError> {
     decode_res::<QueueError>(res)
 }
 
+/// Sends a reply to the process at the front of the queue with no content  
+/// `queue` is the queue to reply to  
+/// `reply` is the tag of the reply message  
 pub fn reply_empty(queue: u32, reply: u32) -> Result<(), QueueError> {
     let mut res: u32;
     unsafe {
@@ -733,6 +917,10 @@ pub fn reply_empty(queue: u32, reply: u32) -> Result<(), QueueError> {
     decode_res::<QueueError>(res)
 }
 
+/// Sends a reply to the process at the front of the notifier queue  
+/// `queue` is the notifier queue to reply to  
+/// `reply` is the tag of the reply message  
+/// `buffer` is the content of the reply message
 pub fn notify_reply(notifier: u32, reply: u32, buffer: &[u8]) -> Result<(), QueueError> {
     let mut res: u32;
     unsafe {
@@ -751,6 +939,9 @@ pub fn notify_reply(notifier: u32, reply: u32, buffer: &[u8]) -> Result<(), Queu
     decode_res::<QueueError>(res)
 }
 
+/// Sends a reply to the process at the front of the notifier queue with no content  
+/// `queue` is the notifier queue to reply to  
+/// `reply` is the tag of the reply message  
 pub fn notify_reply_empty(notifier: u32, reply: u32) -> Result<(), QueueError> {
     let mut res: u32;
     unsafe {
@@ -768,14 +959,20 @@ pub fn notify_reply_empty(notifier: u32, reply: u32) -> Result<(), QueueError> {
     decode_res::<QueueError>(res)
 }
 
+/// Kernel print system call errors
 #[derive(Debug, Clone, Copy)]
 pub enum KPrintError {
+    /// Unknown system call
     UnknownSysCall,
+    /// Invalid memory access
     InvalidAccess,
+    /// Data is not a UTF8 string
     NotUTF8,
+    /// An unknown error happened
     Unknown(u32)
 }
 
+/// Casts from a `u32` to a `KPrintError`
 impl TryFrom<u32> for KPrintError {
     type Error = ();
 
@@ -790,6 +987,9 @@ impl TryFrom<u32> for KPrintError {
     }
 }
 
+/// Gets the kernel to print a message  
+/// `text` is the message to print  
+/// Returns the number of bytes printed on sucess or a `KPrintError` on failure
 pub fn do_kprint(text: &str) -> Result<usize, KPrintError> {
     let data = text.as_bytes();
     let mut res: u32;
@@ -808,25 +1008,34 @@ pub fn do_kprint(text: &str) -> Result<usize, KPrintError> {
     decode_res::<KPrintError>(res).map(|_| len as usize)
 }
 
+/// Kernel print object for handling kernel printing
 struct KPrint {}
 
+// Based off https://os.phil-opp.com/vga-text-mode/ accessed 22/01/2026
 impl Write for KPrint {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         do_kprint(s).map(|_| ()).map_err(|_| fmt::Error)
     }
 }
 
+/// Kernel print macro  
+/// Based off <https://os.phil-opp.com/vga-text-mode/> accessed 22/01/2026
 #[macro_export]
 macro_rules! kprint {
     ($($arg:tt)*) => ($crate::_kprint(format_args!($($arg)*)));
 }
 
+/// Kernel print line macro  
+/// Based off <https://os.phil-opp.com/vga-text-mode/> accessed 22/01/2026
 #[macro_export]
 macro_rules! kprintln {
     () => ($crate::kprint!("\r\n"));
     ($($arg:tt)*) => ($crate::kprint!("{}\r\n", format_args!($($arg)*)));
 }
 
+/// Kernel print function  
+/// `args` is a list of formatting arguments which dictate what's printed  
+/// Based off <https://os.phil-opp.com/vga-text-mode/> accessed 22/01/2026
 #[doc(hidden)]
 pub fn _kprint(args: fmt::Arguments) {
     let mut print = KPrint {};
@@ -834,11 +1043,18 @@ pub fn _kprint(args: fmt::Arguments) {
     res.unwrap();
 }
 
+/// Queue header errors
 pub enum HeaderError {
+    /// The send buffer didn't have the correct size
     InvalidSendBuffer,
+    /// The reply buffer didn't have the correct size
     InvalidReplyBuffer
 }
 
+/// Checks the header has the correct length  
+/// `header` is the header to check  
+/// `send_len` is the send length the header should have  
+/// `reply_len` is the reply length the header should have
 pub fn check_header_len(header: &SyncHeader, send_len: u16, reply_len: u16) -> Result<(), HeaderError> {
     if header.send_len != send_len {
         return Err(HeaderError::InvalidSendBuffer);

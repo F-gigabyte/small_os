@@ -1,3 +1,21 @@
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of the SmallOS Timer driver.
+ *
+ * The SmallOS Timer driver is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU Lesser General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * The SmallOS Timer driver is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with the SmallOS Timer driver. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
 // use core intrinsics 
 #![feature(core_intrinsics)]
 // test framework
@@ -13,75 +31,127 @@ use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite, WriteOnly}};
 
+/// Timer armed register masks and shifts
 mod armed_register {
+    /// Shift for whether the timer is armed
     pub const ARMED_SHIFT: usize = 0;
 
+    /// Mask for whether the timer is armed
     pub const ARMED_MASK: u32 = 0xf << ARMED_SHIFT;
 
-    pub const ARMED1: u32 = 1 << ARMED_SHIFT;
-    pub const ARMED2: u32 = 1 << (ARMED_SHIFT + 1);
-    pub const ARMED3: u32 = 1 << (ARMED_SHIFT + 2);
-    pub const ARMED4: u32 = 1 << (ARMED_SHIFT + 3);
+    /// Timer 0 is armed
+    pub const ARMED0: u32 = 1 << ARMED_SHIFT;
+    /// Timer 1 is armed
+    pub const ARMED1: u32 = 1 << (ARMED_SHIFT + 1);
+    /// Timer 2 is armed
+    pub const ARMED2: u32 = 1 << (ARMED_SHIFT + 2);
+    /// Timer 3 is armed
+    pub const ARMED3: u32 = 1 << (ARMED_SHIFT + 3);
 
+    /// Mask of all non-reserved reset register bits
     pub const VALID_MASK: u32 = ARMED_MASK;
 }
 
+/// Timer debug pause register masks and shifts
 mod debug_pause_register {
+    /// Shift to pause the timer when processor 0 is in debug mode
     pub const DEBUG0_SHIFT: usize = 1;
+    /// Shift to pause the timer when processor 1 is in debug mode
     pub const DEBUG1_SHIFT: usize = 2;
 
+    /// Mask to pause timer when processor 0 is in debug mode
     pub const DEBUG0_MASK: u32 = 1 << DEBUG0_SHIFT;
+    /// Mask to pause the timer when processor 1 is in debug mode
     pub const DEBUG1_MASK: u32 = 1 << DEBUG1_SHIFT;
 
+    /// Mask of all non-reserved reset register bits
     pub const VALID_MASK: u32 = DEBUG0_MASK |
         DEBUG1_MASK;
 }
 
+/// Timer interrupt registers masks and shifts
 mod interrupt_register {
+    ///  Timer 0 interrupt shift
     pub const ALARM0_SHIFT: usize = 0;
+    ///  Timer 1 interrupt shift
     pub const ALARM1_SHIFT: usize = 1;
+    ///  Timer 2 interrupt shift
     pub const ALARM2_SHIFT: usize = 2;
+    ///  Timer 3 interrupt shift
     pub const ALARM3_SHIFT: usize = 3;
 
+    ///  Timer 0 interrupt mask
     pub const ALARM0_MASK: u32 = 1 << ALARM0_SHIFT;
+    ///  Timer 1 interrupt mask
     pub const ALARM1_MASK: u32 = 1 << ALARM1_SHIFT;
+    ///  Timer 2 interrupt mask
     pub const ALARM2_MASK: u32 = 1 << ALARM2_SHIFT;
+    ///  Timer 3 interrupt mask
     pub const ALARM3_MASK: u32 = 1 << ALARM3_SHIFT;
 
+    /// Mask of all non-reserved reset register bits
     pub const VALID_MASK: u32 = ALARM0_MASK | 
         ALARM1_MASK | 
         ALARM2_MASK | 
         ALARM3_MASK;
 }
 
+/// Timer memory mapped registers
 struct TimerRegisters {
+    /// Write to upper time bits (should write to lower first) (0x00)
     timehw: WriteOnly<u32>, // 0x0
+    /// Write to lower time bits (should write to upper next) (0x04)
     timelw: WriteOnly<u32>, // 0x4
+    /// Read from upper time bits (should read from lower first) (0x08)
     timehr: ReadPure<u32>, // 0x8
+    /// Read from lower time bits (should read from upper next) (0x0c)
     timelr: ReadPure<u32>, // 0xc
+    /// Arm timer 0 register (0x10)
     alarm0: ReadPureWrite<u32>, // 0x10
+    /// Arm timer 1 register (0x14)
     alarm1: ReadPureWrite<u32>, // 0x14
+    /// Arm timer 2 register (0x18)
     alarm2: ReadPureWrite<u32>, // 0x18
+    /// Arm timer 3 register (0x1c)
     alarm3: ReadPureWrite<u32>, // 0x1c
+    /// Armed register (0x20)
     armed: ReadPureWrite<u32>, // 0x20
+    /// Read from upper time bits with no side effects (0x24)
     timerawh: ReadPure<u32>, // 0x24
+    /// Read from lower time bits with no side effects (0x28)
     timerawl: ReadPure<u32>, // 0x28
+    /// Debug pause register (0x2c)
     debug_pause: ReadPureWrite<u32>, // 0x2c
+    /// Pause register (0x30)
     pause: ReadPureWrite<u32>, // 0x30
+    /// Raw interrupt register (0x34)
     int_raw: ReadPureWrite<u32>, // 0x34
+    /// Interrupt enable register (0x38)
     int_enable: ReadPureWrite<u32>, // 0x38
+    /// Interrupt force register (0x3c)
     int_force: ReadPureWrite<u32>, // 0x3c
+    /// Interrupt status register (0x40)
     int_status: ReadPure<u32> // 0x40
 }
 
+/// Timer object for managing the timer device
 pub struct Timer {
+    /// Memory mapped registers
     registers: UniqueMmioPointer<'static, TimerRegisters>,
+    /// Memory mapped registers where writing a bit sets the corresponding bit in `registers`
     set_reg: UniqueMmioPointer<'static, TimerRegisters>,
+    /// Memory mapped registers where writing a bit clears the corresponding bit in `registers`
     clear_reg: UniqueMmioPointer<'static, TimerRegisters>,
+    /// Which notifier queues are in use
     notifiers: [bool; 4]
 }
 
 impl Timer {
+    /// Creates a new `Timer` object and initialises it  
+    /// `timer_base` is the base address of the Timer memory mapped registers
+    /// # Safety
+    /// `timer_base` must be a valid address which points to the Timer memory mapped registers and not
+    /// being used by anything else
     pub unsafe fn new(timer_base: usize) -> Self {
         let mut res = unsafe {
             Self {
@@ -95,30 +165,42 @@ impl Timer {
         res
     }
 
+    /// Reads the current time since boot
     pub fn read_time(&mut self) -> u64 {
         let lower = field!(self.registers, timelr).read();
         let upper = field!(self.registers, timehr).read();
         ((upper as u64) << 32) | (lower as u64)
     }
     
+    /// Enables a timer IRQ  
+    /// `timer` is which timer IRQ should be enabled  
+    /// Panics if `timer` is 4 or more
     #[inline(always)]
     pub fn enable_irq(&mut self, timer: u8) { 
         assert!(timer < 4);
         field!(self.set_reg, int_enable).write(1 << timer);
     }
     
+    /// Disables a timer IRQ  
+    /// `timer` is which timer IRQ should be disabled  
+    /// Panics if `timer` is 4 or more
     #[inline(always)]
     pub fn disable_irq(&mut self, timer: u8) { 
         assert!(timer < 4);
         field!(self.clear_reg, int_enable).write(1 << timer);
     }
     
+    /// Clears a timer IRQ  
+    /// `timer` is which timer IRQ should be disabled  
+    /// Panics if `timer` is 4 or more
     #[inline(always)]
     pub fn clear_irq(&mut self, timer: u8) {
         assert!(timer < 4);
         field!(self.set_reg, int_raw).write(1 << timer);
     }
 
+    /// Sets the timer 0 register, arming the timer  
+    /// `count` is the number of microseconds into the future for when the interrupt should fire
     pub fn set_timer0(&mut self, count: u32) {
         // do this step so we lock the time registers in the middle
         let lower = field!(self.registers, timelr).read();
@@ -128,6 +210,8 @@ impl Timer {
         self.enable_irq(0);
     }
     
+    /// Sets the timer 1 register, arming the timer  
+    /// `count` is the number of microseconds into the future for when the interrupt should fire
     pub fn set_timer1(&mut self, count: u32) {
         // do this step so we lock the time registers in the middle
         let lower = field!(self.registers, timelr).read();
@@ -137,6 +221,8 @@ impl Timer {
         self.enable_irq(1);
     }
     
+    /// Sets the timer 2 register, arming the timer  
+    /// `count` is the number of microseconds into the future for when the interrupt should fire
     pub fn set_timer2(&mut self, count: u32) {
         // do this step so we lock the time registers in the middle
         let lower = field!(self.registers, timelr).read();
@@ -146,6 +232,8 @@ impl Timer {
         self.enable_irq(2);
     }
     
+    /// Sets the timer 3 register, arming the timer  
+    /// `count` is the number of microseconds into the future for when the interrupt should fire
     pub fn set_timer3(&mut self, count: u32) {
         // do this step so we lock the time registers in the middle
         let lower = field!(self.registers, timelr).read();
@@ -155,6 +243,8 @@ impl Timer {
         self.enable_irq(3);
     }
 
+    /// Finds a notifier slot to put the next request in  
+    /// Returns `None` if a slot can't be found
     pub fn get_slot(&mut self) -> Option<u8> {
         if !self.notifiers[0] {
             Some(0)
@@ -169,6 +259,10 @@ impl Timer {
         }
     }
 
+    /// Sets a timer register, arming the timer  
+    /// `slot` is which timer to arm  
+    /// `time` is the number of microseconds into the future for when the interrupt should fire  
+    /// Panics if slot is 4 or more
     pub fn set_timer(&mut self, slot: u8, time: u32) {
         assert!(slot < 4);
         match slot {
@@ -192,13 +286,8 @@ impl Timer {
         }
     }
 
-    pub fn get_time(&mut self) -> u64 {
-        let mut res = 0;
-         res |= field!(self.registers, timelr).read() as u64;
-         res |= (field!(self.registers, timehr).read() as u64) << 32;
-         res
-    }
-
+    /// Handles any timer IRQs that fired  
+    /// `mask` is the mask of timer IRQs that fired
     pub fn handle_irqs(&mut self, mut mask: u32) {
         let mut index = 0;
         while mask > 0 && index < 4 {
@@ -212,18 +301,26 @@ impl Timer {
                 mask >>= 1;
             }
         }
+        // clear IRQ at process and NVIC level or else IRQ lingers
         clear_irq().unwrap();
     }
 }
 
+/// Timer reply errors
 pub enum TimerReplyError {
+    /// Queue send error
     SendError,
+    /// An invalid request was made
     InvalidRequest,
+    /// Time request was too large
     TooLarge,
+    /// The send buffer didn't have the correct size
     InvalidSendBuffer,
+    /// The reply buffer didn't have the correct size
     InvalidReplyBuffer
 }
 
+/// Converts from a `TimerReplyError` to a `u32`
 impl From<TimerReplyError> for u32 {
     fn from(value: TimerReplyError) -> Self {
         match value {
@@ -236,6 +333,7 @@ impl From<TimerReplyError> for u32 {
     }
 }
 
+/// Converts from a `HeaderError` to a `TimerReplyError`
 impl From<HeaderError> for TimerReplyError {
     fn from(value: HeaderError) -> Self {
         match value {
@@ -245,31 +343,40 @@ impl From<HeaderError> for TimerReplyError {
     }
 }
 
+/// Timer Errors
 pub enum TimerError {
+    /// Error with the request
     ReplyError(TimerReplyError),
+    /// Error with queue operations
     QueueError(QueueError)
 }
 
+/// Converts from a `TimerReplyError` to a `TimerError`
 impl From<TimerReplyError> for TimerError {
     fn from(value: TimerReplyError) -> Self {
         Self::ReplyError(value)
     }
 }
 
+/// Converts from a `QueueError` to a `TimerError`
 impl From<QueueError> for TimerError {
     fn from(value: QueueError) -> Self {
         Self::QueueError(value)
     }
 }
 
+/// Converts from a `HeaderError` to a `TimerError`
 impl From<HeaderError> for TimerError {
     fn from(value: HeaderError) -> Self {
         Self::from(TimerReplyError::from(value))
     }
 }
 
+/// Timer request
 pub enum Request {
+    /// Sleep micros
     Sleep(u32),
+    /// Read time
     ReadTime
 }
 
@@ -306,10 +413,10 @@ impl Request {
     }
 }
 
+/// Subsystem reset driver endpoint
 const RESET_QUEUE: u32 = 0;
 
-/// Program entry point
-/// Disables mangling so it can be called from assembly
+/// Driver entry point
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     let args = args();

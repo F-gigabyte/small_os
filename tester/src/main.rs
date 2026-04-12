@@ -1,3 +1,21 @@
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of the SmallOS Tester driver.
+ *
+ * The SmallOS Tester driver is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU Lesser General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * The SmallOS Tester driver is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with the SmallOS Tester driver. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
 // use core intrinsics 
 #![feature(core_intrinsics)]
 // test framework
@@ -12,8 +30,7 @@ use core::{arch::asm, assert_matches};
 
 use small_os_lib::{IRQError, QueueError, QueueIRQError, ReplyError, args, clear_irq, do_kprint, do_yield, kprintln, notify_read_header, notify_receive, notify_reply, notify_send, read_header, read_header_async, read_header_async_non_blocking, read_header_non_blocking, receive, receive_async, reply, send, send_async, wait_irq, wait_queues, wait_queues_async, wait_queues_irq, wait_queues_irq_async};
 
-/// Program entry point
-/// Disables mangling so it can be called from assembly
+/// Test main function
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     let args = args();

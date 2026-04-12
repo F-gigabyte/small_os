@@ -1,3 +1,21 @@
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of the SmallOS Subsystem Reset driver.
+ *
+ * The SmallOS Subsystem Reset driver is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU Lesser General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * The SmallOS Subsystem Reset driver is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with the SmallOS Subsystem Reset driver. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
 // use core intrinsics 
 #![feature(core_intrinsics)]
 // test framework
@@ -13,33 +31,38 @@ use core::{ptr::{self, NonNull}};
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadOnly, ReadPureWrite, WriteOnly}};
 use small_os_lib::{HeaderError, QueueError, REG_ALIAS_CLR_BITS, REG_ALIAS_SET_BITS, args, check_critical, check_header_len, do_yield, read_header, reply_empty};
 
+/// Subsystem Reset memory mapped registers
 #[repr(C)]
 struct ResetRegisters {
+    /// Subsystem reset reset register (0x00)
     reset: ReadPureWrite<u32>,
     _reserved0: u32,
+    /// Subsystem reset reset done register (0x08)
     reset_done: ReadOnly<u32>
 }
 
-#[repr(C)]
-struct ResetClearRegisters {
-    reset: WriteOnly<u32>,
-}
-
-#[repr(C)]
-struct ResetSetRegisters {
-    reset: WriteOnly<u32>,
-}
-
+/// Subsystem Reset object for managing device resets
 pub struct Reset {
+    /// Memory mapped registers
     registers: UniqueMmioPointer<'static, ResetRegisters>,
-    clear_reg: UniqueMmioPointer<'static, ResetClearRegisters>,
-    set_reg: UniqueMmioPointer<'static, ResetSetRegisters>,
+    /// Memory mapped registers where writing a bit clears the corresponding bit in `registers`
+    clear_reg: UniqueMmioPointer<'static, ResetRegisters>,
+    /// Memory mapped registers where writing a bit sets the corresponding bit in `registers`
+    set_reg: UniqueMmioPointer<'static, ResetRegisters>,
+    /// Reset bitmap
     bitmap: u32
 }
 
+/// Mask of all non-reserved reset register bits
 const RESET_VALID: u32 = 0x1ffffff;
 
 impl Reset {
+    /// Creates a new `Reset` object and resets all devices specified by `bitmap`  
+    /// `base` is the base address of the Reset memory mapped registers
+    /// `bitmap` is the reset bitmap of devices to reset  
+    /// # Safety
+    /// `base` must be a valid address which points to the Reset memory mapped registers and not
+    /// being used by anything else
     unsafe fn new(base: usize, bitmap: u32) -> Self {
         let mut res = unsafe {
             Self {
@@ -53,6 +76,7 @@ impl Reset {
         res
     }
 
+    /// Resets all devices specified by the device bitmap
     pub fn reset_all(&mut self) {
         // mask is all the devices that need reseting
         let mask = (!field!(self.registers, reset).read()) & self.bitmap;
@@ -68,6 +92,9 @@ impl Reset {
         }
     }
 
+    /// Resets the specified device  
+    /// `device` is the device to reset and is the index of its bit in the reset register
+    /// Panics if `device` is greater than 24
     pub fn reset_device(&mut self, device: u8) {
         assert!(device <= 24);
         let mask = 1 << device;
@@ -81,14 +108,21 @@ impl Reset {
     }
 }
 
+/// Subsystem Reset reply errors
 pub enum ResetReplyError {
+    /// Queue send error
     SendError,
+    /// An invalid request was made
     InvalidRequest,
+    /// An invalid device was specified
     InvalidDevice,
+    /// The send buffer didn't have the correct size
     InvalidSendBuffer,
+    /// The reply buffer didn't have the correct size
     InvalidReplyBuffer
 }
 
+/// Converts from a `HeaderError` to an `ResetReplyError`
 impl From<HeaderError> for ResetReplyError {
     fn from(value: HeaderError) -> Self {
         match value {
@@ -98,6 +132,7 @@ impl From<HeaderError> for ResetReplyError {
     }
 }
 
+/// Converts from a `ResetReplyError` to a `u32`
 impl From<ResetReplyError> for u32 {
     fn from(value: ResetReplyError) -> Self {
         match value {
@@ -110,35 +145,47 @@ impl From<ResetReplyError> for u32 {
     }
 }
 
+/// Reset Errors
 pub enum ResetError {
+    /// Error with the request
     ReplyError(ResetReplyError),
+    /// Error with queue operations
     QueueError(QueueError)
 }
 
+/// Converts from a `ResetReplyError` to a `ResetError`
 impl From<ResetReplyError> for ResetError {
     fn from(value: ResetReplyError) -> Self {
         Self::ReplyError(value)
     }
 }
 
+/// Converts from a `QueueError` to a `ResetError`
 impl From<QueueError> for ResetError {
     fn from(value: QueueError) -> Self {
         Self::QueueError(value)
     }
 }
 
+/// Converts from a `HeaderError` to a `ResetError`
 impl From<HeaderError> for ResetError {
     fn from(value: HeaderError) -> Self {
         Self::from(ResetReplyError::from(value))
     }
 }
 
+/// Subsystem Reset request
 pub enum Request {
+    /// Check if Subsystem Reset has initialised
     Finished,
+    /// Reset a device
     ResetDevice(u8)
 }
 
 impl Request {
+    /// Parses the next request  
+    /// `bitmap` is the device bitmap  
+    /// Returns the request on success or an `ResetError` on failure
     pub fn parse(bitmap: u32) -> Result<Self, ResetError> {
         let header = read_header(0)?;
         match header.tag {
@@ -178,8 +225,7 @@ impl Request {
     }
 }
 
-/// Program entry point
-/// Disables mangling so it can be called from assembly
+/// Driver entry point
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     let args = args();

@@ -1,3 +1,12 @@
+/* Based off the kermit protocol as described at https://www.kermitproject.org/kproto.pdf
+ * (accessed 31/03/2026)
+ * under the license
+ * Copyright (C) 1981,1986
+ * Trustees of Columbia University in the City of New York
+ * Permission is granted to any individual or institution to copy or
+ * use this document, except for explicitly commercial purposes
+ */
+
 // use core intrinsics 
 #![feature(core_intrinsics)]
 // test framework
@@ -10,37 +19,57 @@
 
 use small_os_lib::{HeaderError, QueueError, args, check_critical, check_header_len, read_header, receive, reply_empty, send, send_empty};
 
-/// Based off the kermit protocol as described at https://www.kermitproject.org/kproto.pdf
-/// (accessed 31/03/2026)
 
+/// UART driver endpoint
 const UART_QUEUE: u32 = 0;
 
+/// Different transmission states of the kermit protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KermitState {
+    /// Send Init Packet
     Init,
+    /// Send File Header Packet
     FileHeader,
+    /// Send File Data Packet
     FileData,
+    /// Send End Of File Packet
     EOF,
+    /// Send Break Packet
     Break,
+    /// Wait for Send Init Packet
     WaitInit,
+    /// Wait for File Header Packet
     WaitFileHeader,
+    /// Wait for File Data Packet
     WaitFileData,
+    /// Send Complete Packet
     Complete,
+    /// Send Abort Packet
     Abort
 }
 
+/// Kermit packet types
 #[derive(Debug, Clone, Copy)]
 enum PacketType {
+    /// Data packet
     Data,
+    /// Acknowledge packet
     Ack,
+    /// Not acknowledge packet
     Nak,
+    /// Init packet
     Init,
+    /// Break packet
     Break,
+    /// Header packet
     Header,
+    /// End of file packet
     EOF,
+    /// Error packet
     PacketError
 }
 
+/// Gets the packet type code from `PacketType`
 impl From<PacketType> for u8 {
     fn from(value: PacketType) -> Self {
         match value {
@@ -56,6 +85,7 @@ impl From<PacketType> for u8 {
     }
 }
 
+/// Casts from packet type code to `PacketType`
 impl TryFrom<u8> for PacketType {
     type Error = u8;
 
@@ -74,11 +104,17 @@ impl TryFrom<u8> for PacketType {
     }
 }
 
+/// Transforms a byte in the range 0 to 94 into an ASCII character  
+/// `x` is the byte to convert  
+/// Panics if x is greater than 94
 fn to_char(x: u8) -> u8 {
     assert!(x <= 94);
     x + 32
 }
 
+/// Transforms an ASCII character into a byte in the range 0 to 94  
+/// 'x' is the ASCII character to convert  
+/// Returns the converted byte on success or an error containing `x` on failure
 fn unchar(x: u8) -> Result<u8, u8> {
     if x < 32 {
         Err(x)
@@ -87,26 +123,36 @@ fn unchar(x: u8) -> Result<u8, u8> {
     }
 }
 
+/// Converts between ASCII control characters and their printable representations
 fn ctrl(x: u8) -> u8 {
     x ^ 64
 }
 
+/// Clears the UART RX fifo
 fn clear_all_rx() {
     send_empty(UART_QUEUE, 3, &[]).unwrap();
 }
 
+/// Object to manage the Kermit protocol
 pub struct Kermit {
+    /// The current state of the kermit protocol
     state: KermitState,
+    /// The current packet sequence number
     seq: u8,
+    /// The maximum packet length in ASCII characters
     packet_len: u8,
 }
 
+/// A Kermit data packet
 pub struct KermitPacket {
+    /// The packet length
     data_len: usize,
+    /// The packet data buffer
     data: [u8; 91]
 }
 
 impl Kermit {
+    /// Creates a new `Kermit` object
     pub fn new() -> Self {
         Self {
             state: KermitState::Init,
@@ -115,6 +161,9 @@ impl Kermit {
         }
     }
 
+    /// Sends a Kermit packet  
+    /// `packet_type` is the type of packet to send  
+    /// `data` is the packet contents
     fn send_packet(&mut self, packet_type: PacketType, data: &[u8]) {
         assert!(data.len() <= (self.packet_len - 3) as usize);
         let mut packet = [0; 96];
@@ -132,12 +181,20 @@ impl Kermit {
         }
     }
     
+    /// Calculates the packet checksum  
+    /// `header` is the packet's header  
+    /// `data` is the packet's content
     fn calc_packet_data(header: &[u8], data: &[u8]) -> u8 {
         let s = header[1..].iter().fold(0u8, |a, b| a.wrapping_add(*b));
         let s = data.iter().fold(s, |a, b| a.wrapping_add(*b));
         to_char((s.wrapping_add((s & 192) / 64)) & 63)
     }
 
+    /// Checks the packet's checksum against that calculated for its content  
+    /// `header` is the packet's header  
+    /// `data` is the packet's content  
+    /// `check` is the packet checksum to compare against  
+    /// Returns success if `check` matches the checksum calculated or else returns an error
     fn check_packet_data(header: &[u8], data: &[u8], check: u8) -> Result<(), ()> {
         if Self::calc_packet_data(header, data) == check {
             Ok(())
@@ -146,6 +203,7 @@ impl Kermit {
         }
     }
 
+    /// Gets the header of the next packet in the UART RX fifo
     fn get_packet_header(&mut self) -> [u8; 4] {
         let mut byte = [0];
         while byte[0] != 1 {
@@ -156,6 +214,10 @@ impl Kermit {
         header
     }
 
+    /// Receives a packet of data  
+    /// `perform_check` is whether the packet's checksum should be checked  
+    /// Returns the kermit packet if a valid packet is available, `None` if no valid packet is
+    /// available or an error if an invalid packet type is received
     fn receive_packet(&mut self, perform_check: bool) -> Result<Option<KermitPacket>, KermitReplyError> {
         let packet_header = self.get_packet_header();
         if packet_header[3] == u8::from(PacketType::Nak) {
@@ -201,6 +263,11 @@ impl Kermit {
         }
     }
 
+    /// Sends a packet and waits for it to be acknowledged  
+    /// `packet_type` is the type of packet to send  
+    /// `data` is the packet contents  
+    /// `perform_check` is whether to check received packet checksums  
+    /// Returns the received packet on success or an error on failure
     fn send_packet_ack(&mut self, packet_type: PacketType, data: &[u8], perform_check: bool) -> Result<KermitPacket, KermitReplyError> {
         loop {
             self.send_packet(packet_type, data);
@@ -211,11 +278,15 @@ impl Kermit {
         }
     }
 
-
+    /// Sends an error packet
     fn send_error(&mut self) {
         self.send_packet(PacketType::PacketError, &[]);
     }
 
+    /// Starts a kermit transaction  
+    /// The state must be the `Init` state or else an error is returned and nothing happens  
+    /// This sends the init packet and on success will change the state to the `FileHeader` state
+    /// Otherwise, the state remains in the `Init` state
     pub fn start_transaction(&mut self) -> Result<(), KermitReplyError> {
         if self.state != KermitState::Init {
             return Err(KermitReplyError::InvalidState);
@@ -247,6 +318,11 @@ impl Kermit {
         Ok(())
     }
 
+    /// Starts sending a file  
+    /// `request` is a `Packet` containing the file name  
+    /// The state must be the `FileHeader` state or else an error is returned and nothing happens  
+    /// This sends the file header packet and on success will change the state to the `FileData` state  
+    /// On error, the state transitions back to the `Init` state
     pub fn start_file(&mut self, request: Packet) -> Result<(), KermitReplyError> {
         if self.state != KermitState::FileHeader {
             return Err(KermitReplyError::InvalidState);
@@ -265,6 +341,11 @@ impl Kermit {
         }
     }
 
+    /// Sends a block of file data  
+    /// `request` is a `Packet` containing the file data, which is correctly escaped where needed  
+    /// The state must be the `FileData` state or else an error is returned and nothing happens  
+    /// This sends a data packet  
+    /// On error, the state transitions back to the `Init` state
     pub fn write_data(&mut self, request: Packet) -> Result<(), KermitReplyError> {
         if self.state != KermitState::FileData {
             return Err(KermitReplyError::InvalidState);
@@ -282,6 +363,10 @@ impl Kermit {
         }
     }
 
+    /// Ends a file  
+    /// The state must be the `FileData` state or else an error is returned and nothing happens  
+    /// This sends an end of file packet and on success will change the state to the `FileHeader` state  
+    /// On error, the state transitions back to the `Init` state
     pub fn end_file(&mut self) -> Result<(), KermitReplyError> {
         if self.state != KermitState::FileData {
             return Err(KermitReplyError::InvalidState);
@@ -300,6 +385,10 @@ impl Kermit {
         }
     }
 
+    /// Ends a transaction  
+    /// The state must be the `FileHeader` state or else an error is returned and nothing happens  
+    /// This sends a break packet and on success will change the state to the `Init` state  
+    /// On error, the state transitions back to the `Init` state
     pub fn end_transaction(&mut self) -> Result<(), KermitReplyError> {
         if self.state != KermitState::FileHeader {
             return Err(KermitReplyError::InvalidState);
@@ -319,17 +408,27 @@ impl Kermit {
     }
 }
 
+/// Kermit reply errors
 pub enum KermitReplyError {
+    /// Queue send error
     SendError,
+    /// An invalid request was made
     InvalidRequest,
+    /// An invalid file name was provided
     InvalidFileName,
+    /// An operation was attempted on an invalid state
     InvalidState,
+    /// The packet length is too large
     InvalidPacketLen,
+    /// An invalid packet type was received
     ProtocolError,
+    /// The send buffer didn't have the correct size
     InvalidSendBuffer,
+    /// The reply buffer didn't have the correct size
     InvalidReplyBuffer
 }
 
+/// Converts from a `HeaderError` to a `KermitReplyError`
 impl From<HeaderError> for KermitReplyError {
     fn from(value: HeaderError) -> Self {
         match value {
@@ -339,6 +438,7 @@ impl From<HeaderError> for KermitReplyError {
     }
 }
 
+/// Converts from a `KermitReplyError` to a `u32`
 impl From<KermitReplyError> for u32 {
     fn from(value: KermitReplyError) -> Self {
         match value {
@@ -354,48 +454,66 @@ impl From<KermitReplyError> for u32 {
     }
 }
 
+/// Kermit Errors
 pub enum KermitError {
+    /// Error with the request
     ReplyError(KermitReplyError),
+    /// Error with queue operations
     QueueError(QueueError)
 }
 
+/// Converts from a `KermitReplyError` to a `KermitError`
 impl From<KermitReplyError> for KermitError {
     fn from(value: KermitReplyError) -> Self {
         Self::ReplyError(value)
     }
 }
 
+/// Converts from a `QueueError` to a `KermitError`
 impl From<QueueError> for KermitError {
     fn from(value: QueueError) -> Self {
         Self::QueueError(value)
     }
 }
 
+/// Converts from a `HeaderError` to a `KermitError`
 impl From<HeaderError> for KermitError {
     fn from(value: HeaderError) -> Self {
         Self::from(KermitReplyError::from(value))
     }
 }
 
+/// Kermit packet data
 pub struct Packet {
+    /// The data to be sent
     data: [u8; 90],
+    /// The packet length
     len: u8
 }
 
+/// Kermit request
 pub enum Request {
+    /// Start a Kermit transaction
     StartTransaction,
+    /// Start sending a file
     StartFile(Packet),
+    /// Send some file data
     SendFileData(Packet),
+    /// Finish sending a file
     FinishFile,
+    /// End a Kermit transaction
     EndTransaction
 }
 
 impl Request {
+    /// Parses the next request  
+    /// Returns the request on success or a `KermitError` on failure
     pub fn parse(packet_len: usize) -> Result<Self, KermitError> {
         assert!(packet_len / 2 <= 45);
         let header = read_header(0)?;
         match header.tag {
             0 => {
+                // Start Transaction
                 check_header_len(&header, 0, 0)?;
                 Ok(Self::StartTransaction)
             },
@@ -485,8 +603,7 @@ impl Request {
     }
 }
 
-/// Program entry point
-/// Disables mangling so it can be called from assembly
+/// Driver entry point
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     let args = args();

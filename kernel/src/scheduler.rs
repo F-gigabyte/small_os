@@ -1,31 +1,55 @@
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of the SmallOS kernel.
+ *
+ * The SmallOS kernel is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU Lesser General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * The SmallOS kernel is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with the SmallOS kernel. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
 use core::{cell::UnsafeCell, ptr, slice};
 
 use crate::{inter::{CS, IRQError, QueueIRQError}, message_queue::{AsyncMessageQueue, QueueError, SyncMessageQueue}, messages::MessageHeader, mutex::{IRQGuard, IRQMutex}, nvic::NVIC, proc::{Proc, ProcError, ProcState}, program::{__args, AccessAttr, Program}};
 
 // If this is changed, must change Proc struct
+/// Number of supported process priorities
 const NUM_PRIORITIES: usize = 256;
 
+/// Time quantum in micro seconds
 #[cfg(debug_assertions)]
 pub const QUANTUM_MICROS: u32 = 1000;
+/// Time quantum in micro seconds
 #[cfg(not(debug_assertions))]
 pub const QUANTUM_MICROS: u32 = 100;
 
+/// Scheduler object for handling the scheduling of processes
 pub struct Scheduler {
     // processes managed by scheduler
     // have `UnsafeCell` as processes may be accessed through other means than the array and
     // `UnsafeCell` adds indirection for this
+    /// All the processes managed by this scheduler
     processes: &'static mut [UnsafeCell<Proc>],
-    // next process to be scheduled at priority
+    /// Next process to be scheduled at the given priority
     start_proc: [*mut Proc; NUM_PRIORITIES],
-    // last process to be scheduled at priority
+    /// Last process to be scheduled at the given priority
     end_proc: [*mut Proc; NUM_PRIORITIES],
-    // process currently running
+    /// Process currently running
     current: *mut Proc,
-    // IRQ events
+    /// IRQ events
     irq_events: [*mut Proc; 32],
 }
 
 impl Scheduler {
+    /// Creates a new `Scheduler`
     pub const fn new() -> Self {
         Self { 
             start_proc: [ptr::null_mut(); NUM_PRIORITIES], 
@@ -36,15 +60,17 @@ impl Scheduler {
         }
     }
 
+    /// Initialises the schedulers processes to those past in
     pub fn init(&mut self, processes: &'static mut [UnsafeCell<Proc>]) {
         self.processes = processes;
     }
 
-    /// Creates a process 
-    /// SAFETY
-    /// arguments supplied must be valid for creating a process
-    /// On success, returns the pid of the created process. On error, returns `InvalidPID` if the
-    /// pid doesn't refer to a process or `InvalidState` if the process is not in the `Free` state
+    /// Creates a process  
+    /// `program` is the program to create the process from  
+    /// `args` are the arguments to pass to the process  
+    /// Returns the PID on success or a `ProcError` with the corresponding error on failure
+    /// # Safety
+    /// It must be safe to create this process
     pub unsafe fn create_proc(
         &mut self, 
         program: &'static mut Program,
@@ -86,6 +112,8 @@ impl Scheduler {
         }
     }
 
+    /// Switches out the current process so the next time schedule is called, a new process is
+    /// scheduled
     fn switch_out_current(&mut self) {
         if !self.current.is_null() {
             let current = self.current;
@@ -96,10 +124,16 @@ impl Scheduler {
         }
     }
 
-    /// SAFETY
-    /// preconditions for proc must be upheld as though it was passed through `schedule_process`
-    /// proc must not be accessed from `self.processes`
-    /// proc must not be `self.current`
+    /// Sets up `proc` ready to be scheduled  
+    /// If it preempts the current process, it becomes the next running process  
+    /// If the current process is null or it doesn't preempt current, its placed in its priority's
+    /// queue  
+    /// If `LAST` is true, it's placed at the end of its queue or else it's placed at the start  
+    /// `proc` is the process to be scheduled  
+    /// # Safety
+    /// Preconditions for `proc` must be upheld as though it was passed through `schedule_process`  
+    /// `proc` must not be accessed from `self.processes`  
+    /// `proc` must not be `self.current`
     unsafe fn schedule_internal<const LAST: bool>(&mut self, proc: *mut Proc) {
         let mut proc = unsafe {
             &mut *proc
@@ -107,7 +141,9 @@ impl Scheduler {
         // Check proc is still alive and if not free it
         // This is safe to do as proc isn't referenced anywhere else
         if proc.get_state() == ProcState::Dead {
-            Self::free_proc(&mut self.irq_events, proc);
+            unsafe {
+                Self::free_proc(&mut self.irq_events, proc);
+            }
         }
         if !self.current.is_null() {
             let current = unsafe {
@@ -151,8 +187,8 @@ impl Scheduler {
     }
 
     /// Adds process to be scheduled
-    /// On success returns nothing. On error, returns `InvalidPID` if the `pid` doesn't
-    /// refer to a process or `InvalidState` if the process is not in the `Init` or a blocked state
+    /// `pid` is the process' PID to schedule  
+    /// On error, returns the `ProcError` generated
     pub fn schedule_process(&mut self, pid: u32) -> Result<(), ProcError> {
         if (pid as usize) >= self.processes.len() {
             return Err(ProcError::InvalidPID(pid));
@@ -169,9 +205,9 @@ impl Scheduler {
         }
     }
 
-    /// Gives up current process time
-    /// On success returns nothing. On error, returns `InvalidPID` if the `pid` doesn't
-    /// refer to a process or `InvalidState` if the process is not in the `Running` state
+    /// Gives up current process time  
+    /// `pid` is the PID of the process that yields  
+    /// On error, returns the `ProcError` generated
     pub fn yield_process(&mut self, pid: u32) -> Result<(), ProcError> {
         if (pid as usize) >= self.processes.len() {
             return Err(ProcError::InvalidPID(pid));
@@ -192,6 +228,9 @@ impl Scheduler {
         self.switch_out_current();
     }
 
+    /// Determines the next process to be scheduled not considering process' with the same priority
+    /// as current  
+    /// The next process can then be obtained through `get_current()`
     pub fn next_current_process(&mut self) {
         let priority = if self.current.is_null() {
             NUM_PRIORITIES
@@ -203,7 +242,9 @@ impl Scheduler {
         self.next_process_internal(priority);
     }
 
-    /// Obtains the next process to be scheduled
+    /// Determines the next process to be scheduled considering process' with the same priority as
+    /// current  
+    /// The next process can then be obtained through `get_current()`
     pub fn next_process(&mut self) {
         let priority;
         if self.current.is_null() {
@@ -219,6 +260,9 @@ impl Scheduler {
         self.next_process_internal(priority);
     }
 
+    /// Determines the next process to be scheduled  
+    /// `priority` is one more than the maximum priority to consider  
+    /// The next process can then be obtained through `get_current()`
     fn next_process_internal(&mut self, priority: usize) {
         // if process with same priority as priority - 1, select it to be scheduled next or else
         // stick with current
@@ -237,7 +281,9 @@ impl Scheduler {
                 }
                 // If process is dead, free it as it's not referenced by anything else
                 if proc.get_state() == ProcState::Dead {
-                    Self::free_proc(&mut self.irq_events, proc);
+                    unsafe {
+                        Self::free_proc(&mut self.irq_events, proc);
+                    }
                     continue;
                 }
                 proc.set_state(ProcState::Running);
@@ -255,10 +301,14 @@ impl Scheduler {
                 &mut *self.current
             };
             self.current = ptr::null_mut();
-            Self::free_proc(&mut self.irq_events, current);
+            unsafe {
+                Self::free_proc(&mut self.irq_events, current);
+            }
         }
     }
 
+    /// Resets the current process to before it started executing  
+    /// Swaps the current process out for a new one
     pub fn reset_current(&mut self) {
         if !self.current.is_null() {
             let current = unsafe {
@@ -326,8 +376,9 @@ impl Scheduler {
         }
     }
 
-    /// Suspends the current process to wait for IRQ number `irq`
-    /// `irq` must be a valid IRQ number
+    /// Suspends the current process to wait for IRQ number `irq`  
+    /// `cs` is a token to signify interrupts won't happen  
+    /// Returns an `IRQError` on error
     pub fn sleep_irq(&mut self, cs: &CS) -> Result<(), IRQError> {
         if !self.current.is_null() {
             let current = unsafe {
@@ -355,7 +406,9 @@ impl Scheduler {
     }
 
     /// Wakes up process waiting on IRQ number `irq`
-    /// `irq` must be a valid IRQ number
+    /// `irq` is the IRQ to wake on  
+    /// `cs` is a token to signify interrupts won't happen  
+    /// Panics if `irq` is 32 or more
     pub fn wake(&mut self, irq: u8, cs: &CS) {
         let mut nvic = NVIC.lock(&cs);
         nvic.clear_pending_irq(irq);
@@ -381,13 +434,18 @@ impl Scheduler {
                     self.schedule_internal::<false>(proc);
                 }
             } else if proc.get_state() == ProcState::Dead {
-                Self::free_proc(&mut self.irq_events, proc);
+                unsafe {
+                    Self::free_proc(&mut self.irq_events, proc);
+                }
             } else {
                 proc.mask_in_irq(irq);
             }
         }
     }
 
+    /// Clears IRQ state of pending IRQs from the current process and the NVIC
+    /// `cs` is a token to signify interrupts won't happen  
+    /// Returns an `IRQError` if an error happened
     pub fn clear_irq(&mut self, cs: &CS) -> Result<(), IRQError> {
         if !self.current.is_null() {
             let current = unsafe {
@@ -398,7 +456,10 @@ impl Scheduler {
         Ok(())
     }
 
-    fn free_proc(irq_events: &mut [*mut Proc], proc: *mut Proc) {
+    /// Frees process `proc`  
+    /// `irq_events` are the scheduler's IRQ events  
+    /// `proc` is the process to free
+    unsafe fn free_proc(irq_events: &mut [*mut Proc], proc: *mut Proc) {
         let inter = unsafe {
             (*(*proc).program).inter
         };
@@ -414,6 +475,12 @@ impl Scheduler {
         proc.set_state(ProcState::Free);
     }
 
+    /// Sends a message from the current process to another
+    /// `endpoint` is the process' endpoint to activate  
+    /// `tag` is the message's tag  
+    /// `len` is the message's data length in bytes  
+    /// `data` is the message data to be sent  
+    /// Returns an error if it fails
     pub fn send(&mut self, endpoint: u32, tag: u32, len: u32, data: *mut u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
@@ -482,6 +549,10 @@ impl Scheduler {
         }
     }
 
+    /// Sends a message from one of the current process' queues to one of its notifier queues
+    /// `queue` is the process' queue to send from
+    /// `notifier` is the process' notifier queue to send to
+    /// Returns an error if it fails
     pub fn notify_send(&mut self, queue: u32, notifier: u32) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
@@ -509,9 +580,13 @@ impl Scheduler {
         }
     }
 
-    /// SAFETY
-    /// `data` contains a pointer to a `u8` buffer of length `len` 
-    pub unsafe fn send_async(&mut self, endpoint: u32, tag: u32, len: u32, data: *mut u8) -> Result<(), QueueError> {
+    /// Sends a message from the current process to another
+    /// `endpoint` is the process' asnchronous endpoint to activate  
+    /// `tag` is the message's tag  
+    /// `len` is the message's data length in bytes  
+    /// `data` is the message data to be sent  
+    /// Returns an error if it fails
+    pub fn send_async(&mut self, endpoint: u32, tag: u32, len: u32, data: *mut u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
         };
@@ -572,6 +647,11 @@ impl Scheduler {
         }
     }
 
+    /// Gets the header of from the next process in the synchronous queue `queue` and writes the
+    /// content to the correct registers in `current`  
+    /// `current` is the process who's registers should be updated  
+    /// `queue` is the queue to obtain the next message from  
+    /// Returns a `QueueError` on error
     fn sync_header_internal(&mut self, current: &mut Proc, queue: &mut SyncMessageQueue) -> Result<(), QueueError> {
         let header = queue.read_header()?;
         _ = current.set_r0(header.pid);
@@ -581,6 +661,11 @@ impl Scheduler {
         Ok(())
     }
 
+    /// Gets the state of the process' IRQ state along with the state of any pending IRQs and clears
+    /// both of these states
+    /// `proc` is the process to get the IRQ state from  
+    /// `cs` is a token to signify no interrupts can happen  
+    /// Returns a mask of the IRQs on success or an `IRQError` on failure
     fn get_proc_irq_mask_clear(proc: &mut Proc, cs: &CS) -> Result<u8, IRQError> {
         let mut nvic = NVIC.lock(cs);
         let program = unsafe {
@@ -608,6 +693,10 @@ impl Scheduler {
         }
     }
 
+    /// Gets the header of from the next process in the current process' queue `queue`
+    /// `queue` is the queue to obtain the next message from  
+    /// `block` is whether to block if the queue is empty or return an error  
+    /// Returns a `QueueError` on error
     pub fn header(&mut self, queue: u32, block: bool) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
@@ -635,6 +724,9 @@ impl Scheduler {
         }
     }
 
+    /// Gets the header of from the next process in the current process' notifier queue `notifier`
+    /// `nofifer` is the notifier queue to obtain the next message from  
+    /// Returns a `QueueError` on error
     pub fn notify_header(&mut self, notifier: u32) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
@@ -652,6 +744,10 @@ impl Scheduler {
         }
     }
     
+    /// Gets the header of from the next process in the current process' asynchronous queue `queue`
+    /// `queue` is the asynchronous queue to obtain the next message from  
+    /// `block` is whether to block if the queue is empty or return an error  
+    /// Returns a `QueueError` on error
     pub fn header_async(&mut self, queue: u32, block: bool) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
@@ -688,6 +784,11 @@ impl Scheduler {
         }
     }
 
+    /// Waits on multiple queues from the current process for a process to arrive  
+    /// `queue_mask` is a bitmap of each queue to wait on  
+    /// `irq` is whether to also wait on IRQ events as well  
+    /// `cs` is a token signifying interrupts can't happen  
+    /// Returns a `QueueIRQError` on failure
     pub fn wait_queues(&mut self, queue_mask: u32, irq: bool, cs: &CS) -> Result<(), QueueIRQError> {
         let current = unsafe {
             &mut *self.current
@@ -757,6 +858,11 @@ impl Scheduler {
         Ok(())
     }
 
+    /// Waits on multiple asynchronous queues from the current process for a process to arrive  
+    /// `queue_mask` is a bitmap of each asynchronous queue to wait on  
+    /// `irq` is whether to also wait on IRQ events as well  
+    /// `cs` is a token signifying interrupts can't happen  
+    /// Returns a `QueueIRQError` on failure
     pub fn wait_queues_async(&mut self, queue_mask: u32, irq: bool, cs: &CS) -> Result<(), QueueIRQError> {
         let current = unsafe {
             &mut *self.current
@@ -826,6 +932,12 @@ impl Scheduler {
         Ok(())
     }
 
+    /// Receives message data from a synchronous queue and writes it into `buffer`
+    /// `current` is the process whose buffer should be written into  
+    /// `queue` is the synchronous queue to be read from  
+    /// `len` is the number of bytes to read  
+    /// `buffer` is the buffer to write into  
+    /// Returns a `QueueError` on failure
     fn sync_receive_message_internal(&mut self, current: &mut Proc, queue: &mut SyncMessageQueue, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
         let data = queue.read_data(len as usize)?;
         let len = data.len();
@@ -835,6 +947,11 @@ impl Scheduler {
         Ok(())
     }
 
+    /// Receives message data from a queue and writes it into `buffer` in the current process
+    /// `queue` is the queue to be read from  
+    /// `len` is the number of bytes to read  
+    /// `buffer` is the buffer to write into  
+    /// Returns a `QueueError` on failure
     pub fn receive_message(&mut self, queue: u32, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
@@ -852,6 +969,11 @@ impl Scheduler {
         }
     }
 
+    /// Receives message data from a notifier queue and writes it into `buffer` in the current process
+    /// `notifier` is the notifier to be read from  
+    /// `len` is the number of bytes to read  
+    /// `buffer` is the buffer to write into  
+    /// Returns a `QueueError` on failure
     pub fn notify_receive_message(&mut self, notifier: u32, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
@@ -870,6 +992,11 @@ impl Scheduler {
     }
 
     
+    /// Receives message data from an asynchronous queue and writes it into `buffer` in the current process
+    /// `queue` is the asynchronous queue to be read from  
+    /// `len` is the number of bytes to read  
+    /// `buffer` is the buffer to write into  
+    /// Returns a `QueueError` on failure
     pub fn receive_message_async(&mut self, queue: u32, len: u32, buffer: *mut u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
@@ -891,6 +1018,13 @@ impl Scheduler {
         }
     }
 
+    /// Sends a reply from process `current` to the process at the front of the queue `queue`
+    /// `current` is the process sending the reply  
+    /// `queue` is the synchronous queue to reply to  
+    /// `msg` is the reply tag  
+    /// `len` is the number of bytes to write  
+    /// `buffer` is the buffer to write the reply from  
+    /// Returns a `QueueError` on failure
     fn sync_reply_internal(&mut self, current: &mut Proc, queue: &mut SyncMessageQueue, msg: u32, len: u32, buffer: *const u8) -> Result<(), QueueError> {
         let buffer = if len > 0 {
             Some(current.read_bytes(buffer as u32, len as usize).map_err(|_| QueueError::InvalidMemoryAccess)?)
@@ -923,6 +1057,12 @@ impl Scheduler {
         }
     }
 
+    /// Sends a reply from the current process to the process at the front of the queue `queue`
+    /// `queue` is the queue to reply to  
+    /// `msg` is the reply tag  
+    /// `len` is the number of bytes to write  
+    /// `buffer` is the buffer to write the reply from  
+    /// Returns a `QueueError` on failure
     pub fn reply(&mut self, queue: u32, msg: u32, len: u32, buffer: *const u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
@@ -940,6 +1080,12 @@ impl Scheduler {
         }
     }
 
+    /// Sends a reply from the current process to the process at the front of the notifier queue `queue`
+    /// `notifier` is the notifier queue to reply to  
+    /// `msg` is the reply tag  
+    /// `len` is the number of bytes to write  
+    /// `buffer` is the buffer to write the reply from  
+    /// Returns a `QueueError` on failure
     pub fn notify_reply(&mut self, notifier: u32, msg: u32, len: u32, buffer: *const u8) -> Result<(), QueueError> {
         let current = unsafe {
             &mut *self.current
@@ -957,10 +1103,12 @@ impl Scheduler {
         }
     }
 
+    /// Gets the current process
     pub fn get_current(&mut self) -> *mut Proc {
         self.current
     }
 
+    /// Updates the error codes of the current process
     pub fn update_current_codes(&mut self) {
         if !self.current.is_null() {
             let current = unsafe {
@@ -970,6 +1118,9 @@ impl Scheduler {
         }
     }
 
+    /// Kills the process with PID `pid`  
+    /// `pid` is the PID of the process to kill  
+    /// Returns a `ProcError` on failure
     pub fn kill(&mut self, pid: u32) -> Result<(), ProcError> {
         if (pid as usize) >= self.processes.len() {
             return Err(ProcError::InvalidPID(pid));
@@ -982,11 +1133,15 @@ impl Scheduler {
             Ok(())
         } else if matches!(state, ProcState::BlockedQueue | ProcState::BlockedQueues | ProcState::BlockedQueuesIRQ) {
             proc.wake_from_queues();
-            Self::free_proc(&mut self.irq_events, proc);
+            unsafe {
+                Self::free_proc(&mut self.irq_events, proc);
+            }
             Ok(())
         } else if matches!(state, ProcState::Running | ProcState::Init) {
             // free proc as not referenced anywhere else
-            Self::free_proc(&mut self.irq_events, proc);
+            unsafe {
+                Self::free_proc(&mut self.irq_events, proc);
+            }
             self.current = ptr::null_mut();
             Ok(())
         } else {
@@ -999,6 +1154,7 @@ unsafe impl Send for Scheduler {}
 unsafe impl Sync for Scheduler {}
 
 
+/// Gets the cores CPUID (0 for core 0 and 1 for core 1)
 #[inline(always)]
 pub fn get_cpuid() -> u32 {
     let cpuid_reg: *const u32 = ptr::with_exposed_provenance(0xd0000000);
@@ -1007,8 +1163,9 @@ pub fn get_cpuid() -> u32 {
     }
 }
 
-/// Gets the scheduler for this core
-/// core 0 gets scheduler 0 while core 1 gets scheduler 1
+/// Gets the scheduler for this core  
+/// core 0 gets scheduler 0 while core 1 gets scheduler 1  
+/// `cs` is a token to signify interrupts can't happen
 pub fn scheduler<'a, 'b>(cs: &'b CS) -> IRQGuard<'a, 'b, Scheduler> {
     static SCHEDULER0: IRQMutex<Scheduler> = unsafe {
         IRQMutex::new(Scheduler::new())
@@ -1027,7 +1184,7 @@ pub fn scheduler<'a, 'b>(cs: &'b CS) -> IRQGuard<'a, 'b, Scheduler> {
 }
 
 /// Gets the current process in the scheduler
-/// SAFETY
+/// # Safety
 /// This must be called without interrupts
 #[unsafe(no_mangle)]
 pub unsafe fn get_current_proc() -> *mut Proc {
@@ -1037,6 +1194,11 @@ pub unsafe fn get_current_proc() -> *mut Proc {
     scheduler(&cs).get_current()
 }
 
+/// Corrects errors in `proc`'s memory  
+/// `proc` is the process whose errors should be corrected  
+/// Returns `proc`
+/// # Safety
+/// `proc` must be a valid process
 #[unsafe(no_mangle)]
 pub unsafe fn correct_errors(proc: *mut Proc) -> *mut Proc {
     let proc = unsafe {
@@ -1046,6 +1208,11 @@ pub unsafe fn correct_errors(proc: *mut Proc) -> *mut Proc {
     proc
 }
 
+/// Updates `proc`'s error codes   
+/// `proc` is the process whose error codes should be updated   
+/// Returns `proc`
+/// # Safety
+/// `proc` must be a valid process
 #[unsafe(no_mangle)]
 pub unsafe fn update_codes(proc: *mut Proc) -> *mut Proc {
     let proc = unsafe {

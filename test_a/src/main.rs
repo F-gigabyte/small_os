@@ -1,3 +1,21 @@
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of the SmallOS Test A driver.
+ *
+ * The SmallOS Test A driver is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU Lesser General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * The SmallOS Test A driver is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with the SmallOS Test A driver. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
 // use core intrinsics 
 #![feature(core_intrinsics)]
 // test framework
@@ -11,10 +29,10 @@
 use small_os_lib::{QueueError, ReplyError, args, kprint, kprintln, notify_read_header, notify_receive, notify_reply, notify_send, read_header, read_header_async_non_blocking, read_header_non_blocking, send, send_async, send_empty};
 use core::assert_matches;
 
+/// Test B endpoint
 pub const QUEUE_B: u32 = 0;
 
-/// Program entry point
-/// Disables mangling so it can be called from assembly
+/// Test main function
 #[unsafe(no_mangle)]
 pub extern "C" fn main() {
     let args = args();

@@ -1,8 +1,26 @@
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of the SmallOS kernel.
+ *
+ * The SmallOS kernel is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU Lesser General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * The SmallOS kernel is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with the SmallOS kernel. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
 use core::ptr::{self, NonNull};
 
 use safe_mmio::{UniqueMmioPointer, field, fields::{ReadPure, ReadPureWrite}};
 
-use crate::{inter::CS, mutex::IRQMutex, proc::Proc, program::Region, println};
+use crate::{inter::CS, mutex::IRQMutex, proc::Proc, program::Region};
 
 /// MPU memory mapped registers
 struct MPURegisters {
@@ -158,10 +176,10 @@ mod attr_size_register {
     /// Mask for region execute never
     pub const ATTR_XN_MASK: u32 = 1 << ATTR_XN_SHIFT;
 
-    /// Region maximum size
-    pub const SIZE_MAX: u32 = 0x1f << SIZE_SHIFT;
-    /// Region minimum size
-    pub const SIZE_MIN: u32 = 0x7 << SIZE_SHIFT;
+    /// Region maximum size (not shifted)
+    pub const SIZE_MAX: u32 = 0x1f;
+    /// Region minimum size (not shifted)
+    pub const SIZE_MIN: u32 = 0x7;
     
     /// Region privileged read-write but unprivileged read-only
     pub const ATTR_AP_R: u32 = 0x2 << ATTR_AP_SHIFT;
