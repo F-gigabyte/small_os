@@ -477,9 +477,10 @@ pub extern "C" fn hard_fault(trace: *mut StackTrace, lr: u32) -> *mut Proc {
 
 /// IRQ handler  
 /// `irq` is the IRQ to wake up all sleeping processes on  
-/// Interrupts are handled in a similar way to QNX with processes
-/// registering to them and waiting for them to happen
-/// <https://www.qnx.com/developers/docs/8.0/com.qnx.doc.neutrino.lib_ref/topic/i/interruptattachevent.html> accessed 1/02/2026  
+/// Interrupts are handled by processes
+/// registering to them and waiting for them to happen  
+/// This is based off the `InterruptWait` function in QNX
+/// <https://www.qnx.com/developers/docs/8.0/com.qnx.doc.neutrino.lib_ref/topic/i/interruptwait.html> accessed 1/02/2026  
 /// Returns the next process to schedule
 #[unsafe(no_mangle)]
 pub extern "C" fn irq_handler(irq: u8) -> *mut Proc {

@@ -777,13 +777,13 @@ pub struct Program {
 impl Program {
     /// Shift for program priority
     const PRIORITY_SHIFT: usize = 0;
-    /// Shift for program driver
-    const DRIVER_SHIFT: usize = 16;
+    /// Shift for program device
+    const DEVICE_SHIFT: usize = 16;
 
     /// Mask for program priority
     const PRIORITY_MASK: u32 = 0xff << Self::PRIORITY_SHIFT;
-    /// Mask for program driver
-    const DRIVER_MASK: u32 = 0xffff << Self::DRIVER_SHIFT;
+    /// Mask for program device
+    const DEVICE_MASK: u32 = 0xffff << Self::DEVICE_SHIFT;
     /// No Interrupt (a more lenient definition is an interrupt of 32 or more
     const INTERRUPT_NONE: u8 = 0xff;
 
@@ -829,9 +829,9 @@ impl Program {
         ((self.flags & Self::PRIORITY_MASK) >> Self::PRIORITY_SHIFT) as u8
     }
     
-    /// Gets the program's driver
-    pub fn driver(&self) -> u16 {
-        ((self.flags & Self::DRIVER_MASK) >> Self::DRIVER_SHIFT) as u16
+    /// Gets the program's device
+    pub fn device(&self) -> u16 {
+        ((self.flags & Self::DEVICE_MASK) >> Self::DEVICE_SHIFT) as u16
     }
 
     /// Gets the number of synchronous queues this program has
@@ -869,7 +869,7 @@ impl Program {
     
     /// Returns if the program has any interrupts
     pub fn has_interrupt(&self) -> bool {
-        if self.driver() == 0 {
+        if self.device() == 0 {
             return false;
         }
         for inter in self.inter {
@@ -1161,18 +1161,17 @@ pub unsafe fn init_processes(cs: &CS) {
     };
     // initialise the scheduler with the process table
     scheduler.init(processes);
-    let mut current_driver = 0;
+    let mut current_device = 0;
     // allocate each process from its corresponding program
     for program in programs {
-        println!("Driver {}", program.driver());
-        // drivers stored in increasing order with no driver (0) allowed to be present multiple
-        // times while other drivers only allowed to be present a maximum of one time (due to there
+        println!("Device {}", program.device());
+        // devices stored in increasing order with no device (0) allowed to be present multiple
+        // times while other devices only allowed to be present a maximum of one time (due to there
         // being a single device)
-        // In this context driver refers more to device rather than driver
-        if program.driver() <= current_driver && current_driver != 0 {
-            panic!("Invalid driver ordering for programs");
+        if program.device() <= current_device && current_device != 0 {
+            panic!("Invalid device ordering for programs");
         } else {
-            current_driver = program.driver();
+            current_device = program.device();
         }
         // maximum number of queues is 32 so a single 32 bit number can be used as a queue mask
         if program.num_sync_queues() > 32 {
@@ -1235,30 +1234,30 @@ pub unsafe fn init_processes(cs: &CS) {
         }
         println!("Entry: 0x{:x}", program.entry);
         println!("Stack Region: {}", program.sp);
-        let driver = program.driver() as usize;
+        let device = program.device() as usize;
         // program arguments
         let mut args = [0; 7];
         let kernel_args = unsafe {
             &__args
         };
         let mut arg_len = 0;
-        if driver != 0 {
-            // driver base address argument
+        if device != 0 {
+            // device base address argument
             args[arg_len] = program.regions[0].get_runtime_addr().unwrap();
             arg_len += 1;
-            if driver == 6 {
+            if device == 6 {
                 // IO Bank 0 - needs all the GPIO functions
                 args[arg_len] = kernel_args.pin_func[0];
                 args[arg_len + 1] = kernel_args.pin_func[1];
                 args[arg_len + 2] = kernel_args.pin_func[2];
                 args[arg_len + 3] = kernel_args.pin_func[3];
                 arg_len += 4;
-            } else if driver == 8 {
+            } else if device == 8 {
                 // Pads bank 0 - needs all the GPIO pads information
                 args[arg_len] = kernel_args.pads[0];
                 args[arg_len + 1] = kernel_args.pads[1];
                 arg_len += 2;
-            } else if driver == 27 {
+            } else if device == 27 {
                 // Resets - needs to know what devices to reset
                 args[arg_len] = kernel_args.resets;
                 arg_len += 1;

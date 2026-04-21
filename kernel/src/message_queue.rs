@@ -149,7 +149,7 @@ impl SyncMessageQueue {
         let front = unsafe { &mut *self.front };
         Ok(MessageHeader {
             pid: front.get_pid(),
-            driver_tag: ((front.get_driver() as u32) << 16)
+            device_tag: ((front.get_device() as u32) << 16)
                 | (front
                     .get_r1()
                     .map_err(|_| QueueError::SenderInvalidMemoryAccess)?
@@ -366,7 +366,7 @@ impl AsyncMessageQueue {
                 self.buffer.add(index).write(MessageHeader {
                     pid: proc.get_pid(),
                     pin_mask: proc.get_pin_mask(),
-                    driver_tag: ((proc.get_driver() as u32) << 16) | (tag as u32),
+                    device_tag: ((proc.get_device() as u32) << 16) | (tag as u32),
                     len: data.len() as u32,
                 });
             }
@@ -483,7 +483,7 @@ mod test {
         let header = queue.read_header().unwrap();
         assert_eq!(header.pid, proc.get_pid());
         assert_eq!(header.len, 4);
-        assert_eq!(header.driver_tag & 0xffff, 15);
+        assert_eq!(header.device_tag & 0xffff, 15);
         println!("[ok]");
 
         print!("Testing read body ");
@@ -567,7 +567,7 @@ mod test {
         let header = queue.read_header().unwrap();
         assert_eq!(header.pid, proc.get_pid());
         assert_eq!(header.len, 5);
-        assert_eq!(header.driver_tag & 0xffff, 5);
+        assert_eq!(header.device_tag & 0xffff, 5);
         println!("[ok]");
 
         print!("Testing read body ");

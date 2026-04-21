@@ -319,26 +319,26 @@ impl Scheduler {
                 let program = current.program;
                 current.program = ptr::null_mut();
                 let program = &mut *program;
-                let driver = program.driver() as usize;
+                let device = program.device() as usize;
                 let mut args = [0; 7];
                 let kernel_args = &__args;
                 let mut arg_len = 0;
-                if driver != 0 {
+                if device != 0 {
                     args[arg_len] = program.regions[0].get_runtime_addr().unwrap();
                     arg_len += 1;
-                    if driver == 6 {
+                    if device == 6 {
                         // IO Bank 0
                         args[arg_len] = kernel_args.pin_func[0];
                         args[arg_len + 1] = kernel_args.pin_func[1];
                         args[arg_len + 2] = kernel_args.pin_func[2];
                         args[arg_len + 3] = kernel_args.pin_func[3];
                         arg_len += 4;
-                    } else if driver == 8 {
+                    } else if device == 8 {
                         // Pads bank 0
                         args[arg_len] = kernel_args.pads[0];
                         args[arg_len + 1] = kernel_args.pads[1];
                         arg_len += 2;
-                    } else if driver == 27 {
+                    } else if device == 27 {
                         // Resets
                         args[arg_len] = kernel_args.resets;
                         arg_len += 1;
@@ -509,8 +509,8 @@ impl Scheduler {
                     _ = proc.set_r0(current.get_pid());
                     // pin mask
                     _ = proc.set_r1(current.get_pin_mask());
-                    // driver tag
-                    _ = proc.set_r2(((current.get_driver() as u32) << 16) | (tag & 0xffff));
+                    // device tag
+                    _ = proc.set_r2(((current.get_device() as u32) << 16) | (tag & 0xffff));
                     // message length
                     _ = proc.set_r3(len);
                     queue.blocked = ptr::null_mut();
@@ -611,8 +611,8 @@ impl Scheduler {
                     _ = proc.set_r0(current.get_pid());
                     // pin mask
                     _ = proc.set_r1(current.get_pin_mask());
-                    // driver tag
-                    _ = proc.set_r2(((current.get_driver() as u32) << 16) | (tag & 0xffff));
+                    // device tag
+                    _ = proc.set_r2(((current.get_device() as u32) << 16) | (tag & 0xffff));
                     // message length
                     _ = proc.set_r3(len);
                     queue.blocked = ptr::null_mut();
@@ -656,7 +656,7 @@ impl Scheduler {
         let header = queue.read_header()?;
         _ = current.set_r0(header.pid);
         _ = current.set_r1(header.pin_mask);
-        _ = current.set_r2(header.driver_tag);
+        _ = current.set_r2(header.device_tag);
         _ = current.set_r3(header.len);
         Ok(())
     }
@@ -674,7 +674,7 @@ impl Scheduler {
         let pending = nvic.get_pending();
         let mut mask = proc.get_irq_mask();
         let mut has_inter = false;
-        if program.driver() != 0 {
+        if program.device() != 0 {
             for (i, inter) in program.interrupts().iter().enumerate() {
                 if *inter < 32 {
                     has_inter = true;
@@ -763,7 +763,7 @@ impl Scheduler {
                 Ok(header) => {
                     _ = current.set_r0(header.pid);
                     _ = current.set_r1(header.pin_mask);
-                    _ = current.set_r2(header.driver_tag);
+                    _ = current.set_r2(header.device_tag);
                     _ = current.set_r3(header.len);
                     Ok(())
                 },

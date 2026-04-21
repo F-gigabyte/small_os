@@ -1,4 +1,4 @@
-/* Based off the kermit protocol as described at https://www.kermitproject.org/kproto.pdf
+/* Based off the kermit protocol as described at the online book https://www.kermitproject.org/onlinebooks/kermitbook.pdf (pages 211 to 268)
  * (accessed 31/03/2026)
  * under the license
  * Copyright (C) 1981,1986

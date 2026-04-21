@@ -390,14 +390,14 @@ impl Proc {
         prog.pid
     }
 
-    /// Returns the process' driver
+    /// Returns the process' device
     #[inline(always)]
-    pub fn get_driver(&self) -> u16 {
+    pub fn get_device(&self) -> u16 {
         assert!(!self.program.is_null());
         let prog = unsafe {
             & *self.program
         };
-        prog.driver()
+        prog.device()
     }
 
     /// Returns the process' pin mask

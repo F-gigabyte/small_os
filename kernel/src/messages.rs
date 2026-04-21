@@ -31,10 +31,10 @@ pub struct MessageHeader {
     pub pid: u32,
     /// The calling process' pin mask
     pub pin_mask: u32,
-    /// The driver of the calling process and the message tag
+    /// The device of the calling process and the message tag
     /// - [0..15] -> tag
-    /// - [16..31] -> driver
-    pub driver_tag: u32,
+    /// - [16..31] -> device
+    pub device_tag: u32,
     /// The message length  
     /// For synchronous messages this is
     /// - [0..15] -> send length
