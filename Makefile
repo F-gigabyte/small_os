@@ -29,3 +29,13 @@ build_test_release:
 	cargo test -r --no-run
 	LD=arm-none-eabi-ld OBJCOPY=arm-none-eabi-objcopy pkg -r -t $(TEST_CONFIG) -o $(RELEASE_DIR)/$(EXE_NAME)
 	gdb -x openocd.gdb $(RELEASE_DIR)/$(EXE_NAME)
+
+deploy_debug:
+	cargo build
+	LD=arm-none-eabi-ld OBJCOPY=arm-none-eabi-objcopy pkg $(CONFIG) -o $(DEBUG_DIR)/$(EXE_NAME)
+	elf2uf2-rs -d $(DEBUG_DIR)/$(EXE_NAME) $(DEBUG_DIR)/$(EXE_NAME).uf2
+
+deploy_release:
+	cargo build -r
+	LD=arm-none-eabi-ld OBJCOPY=arm-none-eabi-objcopy pkg $(CONFIG) -r -o $(RELEASE_DIR)/$(EXE_NAME)
+	elf2uf2-rs -d $(RELEASE_DIR)/$(EXE_NAME) $(RELEASE_DIR)/$(EXE_NAME).uf2
