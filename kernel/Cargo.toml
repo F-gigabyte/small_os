@@ -19,7 +19,7 @@ crc32 = { git = "ssh://git@github.com/F-gigabyte/crc32.git" }
 cc = "1.2.53"
 
 [features]
-default = ["benchmark"]
+default = []
 error_codes = []
 benchmark = []
 random = []

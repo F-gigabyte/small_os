@@ -1,10 +1,23 @@
-/* Based off the kermit protocol as described at the online book https://www.kermitproject.org/onlinebooks/kermitbook.pdf (pages 211 to 268)
- * (accessed 31/03/2026)
- * under the license
- * Copyright (C) 1981,1986
- * Trustees of Columbia University in the City of New York
- * Permission is granted to any individual or institution to copy or
- * use this document, except for explicitly commercial purposes
+/* 
+ * Copyright 2026 Fraser Griffin
+ *
+ * This file is part of the SmallOS Kermit Driver.
+ *
+ * The SmallOS Kermit Driver is free software: you can redistribute it and/or modify it under 
+ * the terms of the GNU General Public License as published by the Free Software Foundation, 
+ * either version 3 of the License, or (at your option) any later version.
+ *
+ * The SmallOS Kermit Driver is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; 
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along with the SmallOS Kermit Driver. 
+ * If not, see <https://www.gnu.org/licenses/>. 
+ * 
+ */
+
+/* Based off the kermit protocol as described at the online book
+ * https://www.kermitproject.org/onlinebooks/kermitbook.pdf (pages 211 to 268, accessed 31/03/2026)
  */
 
 // use core intrinsics 

@@ -19,9 +19,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.59"
+version = "1.2.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7a4d3ec6524d28a329fc53654bbadc9bdd7b0431f5d65f1a56ffb28a1ee5283"
+checksum = "43c5703da9466b66a946814e1adf53ea2c90f10063b86290cc9eb67ce3478a20"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -39,7 +39,7 @@ dependencies = [
 [[package]]
 name = "crc32"
 version = "0.1.0"
-source = "git+ssh://git@github.com/F-gigabyte/crc32.git#89b2920c01d8d5e597fd0f3bb0207ff294811d50"
+source = "git+ssh://git@github.com/F-gigabyte/crc32.git#7522524417ae2b9b7770b955ecc32383bca5d081"
 
 [[package]]
 name = "debug-helper"
@@ -63,7 +63,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 [[package]]
 name = "hamming"
 version = "0.1.0"
-source = "git+ssh://git@github.com/F-gigabyte/hamming.git#b976187296bb0d06a37dabcace0b2cd133b31d86"
+source = "git+ssh://git@github.com/F-gigabyte/hamming.git#5c5e65b0290c7ae76181e205495b72ae0012d98d"
 dependencies = [
  "crc32",
 ]
@@ -239,18 +239,18 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "zerocopy"
-version = "0.8.47"
+version = "0.8.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efbb2a062be311f2ba113ce66f697a4dc589f85e78a4aea276200804cea0ed87"
+checksum = "eed437bf9d6692032087e337407a86f04cd8d6a16a37199ed57949d415bd68e9"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.47"
+version = "0.8.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e8bc7269b54418e7aeeef514aa68f8690b8c0489a06b0136e5f57c4c5ccab89"
+checksum = "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4"
 dependencies = [
  "proc-macro2",
  "quote",
