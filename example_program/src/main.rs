@@ -112,7 +112,7 @@ fn temp_sensor() -> ! {
         send(ADC_QUEUE, 0, &mut temp_buffer, 1, 2).unwrap();
         let temp = u16::from_le_bytes(temp_buffer);
         if temp & 1 == 0 {
-            // based of https://microcontrollerslab.com/raspberry-pi-pico-adc-tutorial/ accessed
+            // based off https://microcontrollerslab.com/raspberry-pi-pico-adc-tutorial/ accessed
             // 16/03/2026 where it was mentioned the entire level between 0 and 2 ^ 12 - 1 
             // corresponds to 0V to 3.3V
             let temp = temp >> 1;
