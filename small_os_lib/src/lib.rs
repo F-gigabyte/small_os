@@ -281,8 +281,8 @@ pub struct AsyncHeader {
     pub pid: u32,
     /// Sending process' GPIO pin mask
     pub pin_mask: u32,
-    /// Sending process' driver
-    pub driver: u16,
+    /// Sending process' device
+    pub device: u16,
     /// Message tag
     pub tag: u16,
     /// Message length
@@ -296,8 +296,8 @@ pub struct SyncHeader {
     pub pid: u32,
     /// Sending process' GPIO pin mask
     pub pin_mask: u32,
-    /// Sending process' driver
-    pub driver: u16,
+    /// Sending process' device
+    pub device: u16,
     /// Message tag
     pub tag: u16,
     /// Message send length
@@ -581,7 +581,7 @@ pub fn read_header(queue: u32) -> Result<SyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
     let mut pin_mask: u32;
-    let mut driver_tag: u32;
+    let mut device_tag: u32;
     let mut len: u32;
     unsafe {
         asm!(
@@ -592,7 +592,7 @@ pub fn read_header(queue: u32) -> Result<SyncHeader, QueueError> {
             res = out(reg) res,
             inout("r0") queue => pid,
             out("r1") pin_mask,
-            out("r2") driver_tag,
+            out("r2") device_tag,
             out("r3") len,
         );
     }
@@ -602,8 +602,8 @@ pub fn read_header(queue: u32) -> Result<SyncHeader, QueueError> {
         SyncHeader { 
             pid, 
             pin_mask,
-            driver: (driver_tag >> 16) as u16, 
-            tag: (driver_tag & 0xffff) as u16, 
+            device: (device_tag >> 16) as u16, 
+            tag: (device_tag & 0xffff) as u16, 
             send_len, 
             reply_len 
         }
@@ -659,12 +659,17 @@ pub fn next_message(queue: u32, buffer: &mut[u8], invalid_response: u32, too_lar
         match res {
             Ok(res) => return Ok(res),
             Err(err) => {
-                if matches!(err, QueueError::Died | QueueError::SenderInvalidMemoryAccess) {
-                    reply_empty(queue, invalid_response)?;
-                } else if err == QueueError::BufferTooSmall {
-                    reply_empty(queue, too_large_response)?;
-                } else {
-                    return Err(err);
+                match err {
+                    QueueError::Died => {},
+                    QueueError::SenderInvalidMemoryAccess => {
+                        reply_empty(queue, invalid_response)?;
+                    },
+                    QueueError::BufferTooSmall => {
+                        reply_empty(queue, too_large_response)?;
+                    },
+                    _ => {
+                        return Err(err);
+                    }
                 }
             }
         }
@@ -678,7 +683,7 @@ pub fn read_header_async(queue: u32) -> Result<AsyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
     let mut pin_mask: u32;
-    let mut driver_tag: u32;
+    let mut device_tag: u32;
     let mut len: u32;
     unsafe {
         asm!(
@@ -689,7 +694,7 @@ pub fn read_header_async(queue: u32) -> Result<AsyncHeader, QueueError> {
             res = out(reg) res,
             inout("r0") queue => pid,
             out("r1") pin_mask,
-            out("r2") driver_tag,
+            out("r2") device_tag,
             out("r3") len,
         );
     }
@@ -697,8 +702,8 @@ pub fn read_header_async(queue: u32) -> Result<AsyncHeader, QueueError> {
         AsyncHeader { 
             pid, 
             pin_mask,
-            driver: (driver_tag >> 16) as u16, 
-            tag: (driver_tag & 0xffff) as u16, 
+            device: (device_tag >> 16) as u16, 
+            tag: (device_tag & 0xffff) as u16, 
             message_len: len 
         }
     )
@@ -711,7 +716,7 @@ pub fn read_header_non_blocking(queue: u32) -> Result<SyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
     let mut pin_mask: u32;
-    let mut driver_tag: u32;
+    let mut device_tag: u32;
     let mut len: u32;
     unsafe {
         asm!(
@@ -722,7 +727,7 @@ pub fn read_header_non_blocking(queue: u32) -> Result<SyncHeader, QueueError> {
             res = out(reg) res,
             inout("r0") queue => pid,
             out("r1") pin_mask,
-            out("r2") driver_tag,
+            out("r2") device_tag,
             out("r3") len,
         );
     }
@@ -732,8 +737,8 @@ pub fn read_header_non_blocking(queue: u32) -> Result<SyncHeader, QueueError> {
         SyncHeader { 
             pid, 
             pin_mask,
-            driver: (driver_tag >> 16) as u16, 
-            tag: (driver_tag & 0xffff) as u16, 
+            device: (device_tag >> 16) as u16, 
+            tag: (device_tag & 0xffff) as u16, 
             send_len, 
             reply_len 
         }
@@ -747,7 +752,7 @@ pub fn read_header_async_non_blocking(queue: u32) -> Result<AsyncHeader, QueueEr
     let mut res: u32;
     let mut pid: u32;
     let mut pin_mask: u32;
-    let mut driver_tag: u32;
+    let mut device_tag: u32;
     let mut len: u32;
     unsafe {
         asm!(
@@ -758,7 +763,7 @@ pub fn read_header_async_non_blocking(queue: u32) -> Result<AsyncHeader, QueueEr
             res = out(reg) res,
             inout("r0") queue => pid,
             out("r1") pin_mask,
-            out("r2") driver_tag,
+            out("r2") device_tag,
             out("r3") len,
         );
     }
@@ -766,8 +771,8 @@ pub fn read_header_async_non_blocking(queue: u32) -> Result<AsyncHeader, QueueEr
         AsyncHeader { 
             pid,
             pin_mask,
-            driver: (driver_tag >> 16) as u16, 
-            tag: (driver_tag & 0xffff) as u16, 
+            device: (device_tag >> 16) as u16, 
+            tag: (device_tag & 0xffff) as u16, 
             message_len: len 
         }
     )
@@ -780,7 +785,7 @@ pub fn notify_read_header(queue: u32) -> Result<SyncHeader, QueueError> {
     let mut res: u32;
     let mut pid: u32;
     let mut pin_mask: u32;
-    let mut driver_tag: u32;
+    let mut device_tag: u32;
     let mut len: u32;
     unsafe {
         asm!(
@@ -791,7 +796,7 @@ pub fn notify_read_header(queue: u32) -> Result<SyncHeader, QueueError> {
             res = out(reg) res,
             inout("r0") queue => pid,
             out("r1") pin_mask,
-            out("r2") driver_tag,
+            out("r2") device_tag,
             out("r3") len,
         );
     }
@@ -801,8 +806,8 @@ pub fn notify_read_header(queue: u32) -> Result<SyncHeader, QueueError> {
         SyncHeader { 
             pid, 
             pin_mask,
-            driver: (driver_tag >> 16) as u16, 
-            tag: (driver_tag & 0xffff) as u16, 
+            device: (device_tag >> 16) as u16, 
+            tag: (device_tag & 0xffff) as u16, 
             send_len, 
             reply_len 
         }
