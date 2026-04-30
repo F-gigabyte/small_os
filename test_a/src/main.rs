@@ -50,7 +50,7 @@ pub extern "C" fn main() {
     kprintln!("[ok]");
     kprint!("Testing notify send ");
     let header = read_header(QUEUE_B).unwrap();
-    assert_eq!(header.driver, 0);
+    assert_eq!(header.device, 0);
     assert_eq!(header.tag, 83);
     assert_eq!(header.pin_mask, 0);
     assert_eq!(header.send_len, 7);
@@ -59,7 +59,7 @@ pub extern "C" fn main() {
     kprintln!("[ok]");
     kprint!("Testing notify read header ");
     let header = notify_read_header(0).unwrap();
-    assert_eq!(header.driver, 0);
+    assert_eq!(header.device, 0);
     assert_eq!(header.tag, 83);
     assert_eq!(header.pin_mask, 0);
     assert_eq!(header.send_len, 7);

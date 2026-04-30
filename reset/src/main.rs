@@ -197,20 +197,20 @@ impl Request {
             1 => {
                 // Reset Device request
                 check_header_len(&header, 0, 0)?; 
-                if header.driver >= 1 && header.driver <= 22 {
-                    let extra_shift = if header.driver > 21 {
+                if header.device >= 1 && header.device <= 22 {
+                    let extra_shift = if header.device > 21 {
                         // skip UART1, TBMAN and JTAG
                         3
-                    } else if header.driver > 19 {
+                    } else if header.device > 19 {
                         // skip TBMAN and JTAG
                         2
-                    } else if header.driver > 7 {
+                    } else if header.device > 7 {
                         // skip JTAG
                         1
                     } else {
                         0
                     };
-                    let device = (header.driver + extra_shift - 1) as u8;
+                    let device = (header.device + extra_shift - 1) as u8;
                     if (1 << device) & bitmap != 0 {
                         Ok(Self::ResetDevice(device))
                     } else {

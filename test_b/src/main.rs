@@ -39,13 +39,13 @@ pub extern "C" fn main() {
     assert_eq!(args.len(), 0);
     kprintln!("Test B Tests");
     let header = read_header(QUEUE_A).unwrap();
-    assert_eq!(header.driver, 0);
+    assert_eq!(header.device, 0);
     assert_eq!(header.tag, 1);
     assert_eq!(header.pin_mask, 0);
     assert_eq!(header.send_len, 5);
     assert_eq!(header.reply_len, 0);
     let header = read_header_non_blocking(QUEUE_A).unwrap();
-    assert_eq!(header.driver, 0);
+    assert_eq!(header.device, 0);
     assert_eq!(header.tag, 1);
     assert_eq!(header.pin_mask, 0);
     assert_eq!(header.send_len, 5);
@@ -62,7 +62,7 @@ pub extern "C" fn main() {
     reply_empty(QUEUE_A, 4).unwrap();
     kprint!("Testing read header async ");
     let header = read_header_async(QUEUE_A).unwrap();
-    assert_eq!(header.driver, 0);
+    assert_eq!(header.device, 0);
     assert_eq!(header.tag, 95);
     assert_eq!(header.pin_mask, 0);
     assert_eq!(header.message_len, 5);
