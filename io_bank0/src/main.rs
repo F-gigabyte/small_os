@@ -215,8 +215,6 @@ pub enum IOBank0ReplyError {
     InvalidRequest,
     /// An invalid GPIO was selected
     InvalidGPIO,
-    /// An invalid function select was selected
-    InvalidFunc,
     /// The send buffer didn't have the correct size
     InvalidSendBuffer,
     /// The reply buffer didn't have the correct size
@@ -240,9 +238,8 @@ impl From<IOBank0ReplyError> for u32 {
             IOBank0ReplyError::SendError => 1,
             IOBank0ReplyError::InvalidRequest => 2,
             IOBank0ReplyError::InvalidGPIO => 3,
-            IOBank0ReplyError::InvalidFunc => 4,
-            IOBank0ReplyError::InvalidSendBuffer => 5,
-            IOBank0ReplyError::InvalidReplyBuffer => 6
+            IOBank0ReplyError::InvalidSendBuffer => 4,
+            IOBank0ReplyError::InvalidReplyBuffer => 5
         }
     }
 }
