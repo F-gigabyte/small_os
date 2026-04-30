@@ -39,3 +39,8 @@ deploy_release:
 	cargo build -r
 	LD=arm-none-eabi-ld OBJCOPY=arm-none-eabi-objcopy pkg $(CONFIG) -r -o $(RELEASE_DIR)/$(EXE_NAME)
 	elf2uf2-rs -d $(RELEASE_DIR)/$(EXE_NAME) $(RELEASE_DIR)/$(EXE_NAME).uf2
+
+# Based on https://os.phil-opp.com/freestanding-rust-binary/ accessed 30/04/2026
+init_setup:
+	rustup override set nightly
+	rustup target add thumbv6m-none-eabi

@@ -7,7 +7,7 @@ edition = "2024"
 authors = ["Fraser Griffin <f.griffin.22@abdn.ac.uk>"]
 description = "The SmallOS microkernel"
 repository = "https://github.com/F-gigabyte/small_os"
-license = "LGPL-3.0-or-later"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 rp2040-boot2 = "0.3.0"
